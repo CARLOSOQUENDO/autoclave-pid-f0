@@ -1,0 +1,41 @@
+MIT License
+
+Copyright (c) 2026 Carlos Oquendo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+AVISO DE SEGURIDAD
+
+Este software controla un recipiente a presion que opera a 120 VAC y ~2 bar.
+Un fallo puede causar lesiones graves.
+
+Quien lo use o adapte es responsable de:
+
+  - Mantener intactas las capas de proteccion fisica: valvula de seguridad de
+    la olla, termostato bimetalico independiente del firmware, y fusible.
+  - Verificar la calibracion del sensor contra un patron trazable.
+  - Validar la penetracion termica en su carga concreta. La temperatura en el
+    termowell NO es la temperatura en el centro de la carga.
+  - Cumplir la normativa local aplicable a esterilizacion y a recipientes a
+    presion.
+
+El firmware incluye protecciones, pero ninguna sustituye a las capas mecanicas
+ni a la supervision de un operador competente.
