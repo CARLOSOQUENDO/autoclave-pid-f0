@@ -1,0 +1,25 @@
+# Compilacion de Arduino
+build/
+*.hex
+*.bin
+*.elf
+*.map
+
+# OneDrive y Windows
+desktop.ini
+Thumbs.db
+~$*
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Ensayos de prueba desechables (los validos SI se versionan)
+ensayos/_*.csv
