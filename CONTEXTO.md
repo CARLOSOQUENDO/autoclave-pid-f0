@@ -1244,6 +1244,69 @@ sin necesidad.
 
 ---
 
+## 10.15 Falsos positivos de marcha en seco con carga real (v1.2.0)
+
+**Síntoma:** con sustrato dentro, el ciclo abortaba repetidamente con
+`posible marcha en seco: +4.9 C/10min`.
+
+**Dos defectos, uno de calibración y uno de honestidad del mensaje.**
+
+### El mensaje mentía
+
+`SECO_VENTANA_MS` se había recalibrado a 5 minutos en la v0.4.3, pero el literal
+del `snprintf` seguía diciendo `/10min`. El equipo reportaba una ventana que no
+era la que usaba. Corregido: ahora el mensaje construye la ventana real desde la
+constante, así que no puede volver a desincronizarse.
+
+### El umbral estaba calibrado con la olla vacía
+
+4.9 °C en 5 minutos son **0.98 °C/min**. Invirtiendo el balance térmico:
+
+```
+C = 1165 W / (0.98/60 K/s) = 71.300 J/K
+    - olla y agua (45.000) = ~26.000 J/K de carga  ≈ 6 kg de sustrato húmedo
+```
+
+Es decir: **una rampa perfectamente sana, que falló por 0.1 °C.** El umbral de
+1.0 °C/min se fijó con la olla vacía y no deja sitio a la carga real.
+
+| | Antes | Ahora |
+| :--- | :--- | :--- |
+| Ventana | 5 min | **10 min** |
+| Umbral | +5.0 °C | **+2.0 °C** |
+| Tasa mínima exigida | 1.00 °C/min | **0.20 °C/min** |
+
+Con la carga más pesada plausible la rampa sigue dando más de 5 °C en 10 min, y
+ante una falta real de calor la temperatura **baja** — delta negativo, que es
+inequívoco.
+
+> Un detector que da falsos positivos acaba puenteado, y entonces no protege de
+> nada. Aflojarlo hasta que solo dispare ante lo inequívoco lo hace más útil, no
+> menos seguro.
+
+### 10.15.1 Detector rápido de purga — el que de verdad sirve
+
+Aprovechando que la máquina de estados ya sabe cuándo la válvula está abierta
+(§5 Fases 1 y 2), se añade una comprobación que **no es heurística**:
+
+> Con la válvula abierta, la temperatura **no puede** superar la ebullición
+> mientras quede agua: el calor se va en vaporizar. Si sube claramente por
+> encima, el agua se acabó.
+
+`SECO_SOBRE_EBU_C = 8.0` → dispara por encima de **103 °C** durante
+`F_CALENTANDO` y `F_PURGA`. Medido en purga real: ~97 °C, o sea 2 °C de
+contrapresión por el vapor saliendo. Margen de 6 °C.
+
+**Actúa en segundos en lugar de minutos**, y no puede dar falso positivo porque
+no mide un ritmo: comprueba una imposibilidad termodinámica.
+
+No se aplica en `F_CERRAR_VALVULA`, donde superar la ebullición es justamente lo
+que se espera al sellar la olla.
+
+Esto cierra lo que §10.4 dejó planteado: el detector consciente de la fase.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa

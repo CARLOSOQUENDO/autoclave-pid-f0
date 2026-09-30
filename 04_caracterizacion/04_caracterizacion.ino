@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.1.1";
+const char *VERSION_FW = "1.2.0";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -150,9 +150,30 @@ const float T_MAX_VALIDA      = 150.0;
 // Recalibrado para 1680 W: a esa potencia el agua sube ~3.6 C/min al 100 %
 // con 4 L y la olla fria, asi que en 5 min deberia subir >10 C. Se exige la
 // mitad para dejar margen a perdidas y a cargas grandes.
+// Detector LENTO, de respaldo: "potencia a fondo y no pasa nada".
+//
+// Recalibrado 2026-09-30 tras falsos positivos con carga real. El umbral
+// anterior (5 C en 5 min = 1.0 C/min) lo fije con la olla vacia; con 6 kg de
+// sustrato la rampa legitima baja a ~0.98 C/min y fallaba por 0.1 C.
+//
+// Ahora: 10 min y +2 C. Incluso con la carga mas pesada la rampa da mas de
+// 5 C en 10 min, y si de verdad no llega calor la temperatura BAJA (delta
+// negativo), que es inequivoco. Un detector que da falsos positivos acaba
+// puenteado, y entonces no protege de nada.
 const int      SECO_DUTY_MINIMO = 80;
-const uint32_t SECO_VENTANA_MS  = 5UL * 60UL * 1000UL;
-const float    SECO_DELTA_MIN   = 5.0;
+const uint32_t SECO_VENTANA_MS  = 10UL * 60UL * 1000UL;
+const float    SECO_DELTA_MIN   = 2.0;
+
+// Detector RAPIDO, especifico de la fase de purga.
+//
+// Con la valvula abierta la temperatura no puede superar la ebullicion
+// mientras quede agua: la fisica lo impide, el calor se va en vaporizar. Si
+// sube claramente por encima, el agua se acabo. Esto no es una heuristica,
+// es una imposibilidad termodinamica, y actua en segundos en vez de minutos.
+//
+// Medido en purga real: ~97 C, o sea 2 C de contrapresion por el vapor
+// saliendo. El umbral en +8 C deja margen de sobra.
+const float SECO_SOBRE_EBU_C = 8.0f;
 
 // -- Gracia y antirrebote --
 // Al encender, el MAX31865 reporta flags espurios mientras se estabilizan la
@@ -493,6 +514,12 @@ int avanzarCiclo(float t) {
 
     case F_CALENTANDO:
       // Valvula abierta. Se calienta a fondo hasta que rompe a hervir.
+      if (t > ebu + SECO_SOBRE_EBU_C) {
+        char b[56];
+        snprintf(b, sizeof(b), "SECO: %.1f C con valvula abierta", t);
+        entrarEnFalla(b);
+        return 0;
+      }
       if (t >= ebu - MARGEN_EBU_C) { cambiarFase(F_PURGA); avisoAccion(); }
       return 100;
 
@@ -500,6 +527,15 @@ int avanzarCiclo(float t) {
       // Siete minutos de vapor continuo. Si la temperatura cae por debajo de
       // la ebullicion es que dejo de hervir: se vuelve a calentar y el conteo
       // se reinicia, porque una purga interrumpida no barre el aire.
+      // Con la valvula abierta y agua dentro, la temperatura se queda en la
+      // ebullicion. Que suba claramente por encima solo puede significar que
+      // ya no hay agua que vaporizar.
+      if (t > ebu + SECO_SOBRE_EBU_C) {
+        char b[56];
+        snprintf(b, sizeof(b), "SECO: %.1f C purgando con valvula abierta", t);
+        entrarEnFalla(b);
+        return 0;
+      }
       if (t < ebu - MARGEN_EBU_C - 1.0f) { cambiarFase(F_CALENTANDO); return 100; }
       if (enFase >= PURGA_MS) {
         g_tAlCerrar = t;
@@ -878,7 +914,9 @@ void tareaSensor(void *pv) {
           else if ((uint32_t)(ahora - marcaSeco) >= SECO_VENTANA_MS) {
             if (t - tMarcaSeco < SECO_DELTA_MIN) {
               char b[48];
-              snprintf(b, sizeof(b), "posible marcha en seco: +%.1f C/10min", t - tMarcaSeco);
+              snprintf(b, sizeof(b), "sin calentar: +%.1f C en %lu min al %d%%",
+                       t - tMarcaSeco,
+                       (unsigned long)(SECO_VENTANA_MS / 60000), g_dutyComandado);
               entrarEnFalla(b);
             } else { tMarcaSeco = t; marcaSeco = ahora; }
           }
