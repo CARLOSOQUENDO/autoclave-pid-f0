@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.5.0";
+const char *VERSION_FW = "1.6.0";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -203,6 +203,7 @@ const uint8_t FLAGS_PARA_INVALIDAR = 5;
 enum Estado : int { EST_IDLE = 0, EST_ENSAYO = 1, EST_FALLA = 2, EST_PID = 3, EST_CICLO = 4 };
 volatile int g_estado = EST_IDLE;
 char g_motivoFalla[48] = "";
+bool g_fallaCritica    = false;   // critica = no se borra desde el encoder
 char g_avisoSensor[32] = "";   // problema actual del sensor, sin latchar
 
 volatile int   g_dutyComandado = 0;
@@ -333,19 +334,56 @@ void melodiaFin() {                       // ensayo terminado correctamente
 void ponerSSR(bool on) { digitalWrite(PIN_SSR, on ? HIGH : LOW); }
 
 // El estado de FALLA es terminal: solo se sale con reset manual (§7.2).
-void entrarEnFalla(const char *motivo) {
+// Dos niveles de falla, porque las causas no son igual de graves (7.2).
+//
+//   RECUPERABLE: marcha en seco, tiempo maximo agotado. La causa esta afuera
+//   del equipo -- falta agua, la carga es mas grande de lo previsto -- y el
+//   operador la corrige y vuelve a arrancar. Se reconoce con pulsacion larga.
+//
+//   CRITICA: la temperatura paso el limite absoluto, o el sensor quedo ciego
+//   con la salida energizada. Eso significa que fallo el hardware: el SSR
+//   conduce sin orden, o el control esta a ciegas. El ciclo siguiente
+//   calentaria sin nadie vigilando, asi que NO se borra desde el panel y
+//   sobrevive al corte de alimentacion. Solo sale con "reset" por consola,
+//   cuando alguien ya reviso que paso.
+void latcharFalla(const char *motivo, bool critica) {
   ponerSSR(false);
   g_dutyComandado = 0;
   g_salidaArmada  = 0;
   g_estado        = EST_FALLA;
+  g_fallaCritica  = critica;
   strncpy(g_motivoFalla, motivo, sizeof(g_motivoFalla) - 1);
   g_motivoFalla[sizeof(g_motivoFalla) - 1] = '\0';
   g_pedirFlush = true;                    // conservar lo registrado hasta aqui
+  if (critica) {
+    prefs.putBool  ("fcrit", true);
+    prefs.putString("fmot",  g_motivoFalla);
+  }
   Serial.println();
   Serial.println(F("# ***************************************************"));
-  Serial.printf ("# *** FALLA: %s\n", motivo);
+  Serial.printf ("# *** FALLA%s: %s\n", critica ? " CRITICA" : "", motivo);
+  if (critica)
+    Serial.println(F("# *** Grabada en NVS. Apagar el equipo NO la borra. ***"));
   Serial.println(F("# *** Salida cortada. Requiere reset del operador. ***"));
   Serial.println(F("# ***************************************************"));
+}
+
+void entrarEnFalla(const char *motivo)        { latcharFalla(motivo, false); }
+void entrarEnFallaCritica(const char *motivo) { latcharFalla(motivo, true);  }
+
+// Se llama UNA vez en setup(), no desde cargarParametros(): recargar los
+// parametros desde el menu no debe resucitar una falla ya reconocida.
+void restaurarFallaCritica() {
+  if (!prefs.getBool("fcrit", false)) return;
+  String m = prefs.getString("fmot", "falla critica previa al reinicio");
+  strncpy(g_motivoFalla, m.c_str(), sizeof(g_motivoFalla) - 1);
+  g_motivoFalla[sizeof(g_motivoFalla) - 1] = '\0';
+  g_fallaCritica = true;
+  g_estado       = EST_FALLA;
+  g_salidaArmada = 0;
+  Serial.println(F("# *** ARRANCA EN FALLA CRITICA SIN RECONOCER ***"));
+  Serial.printf ("# *** Motivo guardado: %s\n", g_motivoFalla);
+  Serial.println(F("# *** Revise el SSR y el sensor antes de dar reset. ***"));
 }
 
 void desarmar(const char *motivo) {
@@ -915,12 +953,12 @@ void tareaSensor(void *pv) {
       if (sobreTempSegs >= DEBOUNCE_SOBRETEMP) {
         char b[48];
         snprintf(b, sizeof(b), "T=%.1f C supera limite %.0f C", tVigilada, T_LIMITE_ABSOLUTO);
-        entrarEnFalla(b);
+        entrarEnFallaCritica(b);
       }
       // Sensor invalido: latcha solo si hay algo energizado. En reposo basta
       // con marcarlo invalido, que ya impide armar y lanzar el ensayo.
       else if (fallosSeguidos >= DEBOUNCE_SENSOR) {
-        if (energizado) entrarEnFalla(g_avisoSensor);
+        if (energizado) entrarEnFallaCritica(g_avisoSensor);
         else if (fallosSeguidos == DEBOUNCE_SENSOR)
           Serial.printf("# [!] Sensor no valido: %s. No se puede armar.\n", g_avisoSensor);
       }
@@ -1204,7 +1242,7 @@ void dibujarFalla() {
   pantalla.setFont(u8g2_font_7x13_tf);
   pantalla.drawBox(0, 0, 128, 15);
   pantalla.setDrawColor(0);
-  pantalla.drawStr(3, 12, "*** FALLA ***");
+  pantalla.drawStr(3, 12, g_fallaCritica ? "** FALLA GRAVE **" : "*** FALLA ***");
   pantalla.setDrawColor(1);
 
   // El motivo puede no caber en una linea. Se parte por un ESPACIO, no a los
@@ -1228,7 +1266,8 @@ void dibujarFalla() {
 
   pantalla.drawHLine(0, 44, 128);
   pantalla.drawStr(0, 54, "SALIDA CORTADA");
-  pantalla.drawStr(0, 62, "DEJE PULSADO PARA SALIR");
+  if (g_fallaCritica) pantalla.drawStr(0, 62, "REQUIERE REVISION TECNICA");
+  else                pantalla.drawStr(0, 62, "DEJE PULSADO PARA SALIR");
 }
 
 void dibujarMenu() {
@@ -1813,6 +1852,10 @@ void lanzarPID() {
 }
 
 void lanzarCiclo() {
+  if (g_estado == EST_FALLA) {     // red de seguridad: no deberia llegar aqui
+    Serial.println(F("# Hay una FALLA activa. No se lanza el ciclo."));
+    return;
+  }
   g_duracionEnsayoMs = (uint32_t)g_par.minutosEnsayo * 60000UL;
   g_nMuestras     = 0;
   g_dutyEnsayo    = 0;
@@ -1895,12 +1938,15 @@ void aplicarPulsacion(int tipo) {
     // delante habria que cortar la alimentacion, que es peor: se pierde el
     // contexto y el operador puede no saber que debe hacerlo.
     // Reconocer NO es rearmar: la salida sigue desarmada al salir.
-    if (tipo == 2) {
+    if (tipo == 2 && !g_fallaCritica) {
       g_estado = EST_IDLE;
       g_motivoFalla[0] = '\0';
       g_vista = V_PRINCIPAL;
       Serial.println(F("# FALLA reconocida desde el encoder. Salida sigue desarmada."));
       pitidoOk();
+    } else if (tipo == 2) {
+      avisoAccion();        // suena pero no cede: esta es de las graves
+      Serial.println(F("# FALLA CRITICA: no se reconoce desde el panel."));
     }
     return;
   }
@@ -2249,8 +2295,13 @@ void procesarComando(String c) {
                               Serial.println(F("# Ensayo borrado.")); }
   else if (c == "reset") {
     if (g_estado != EST_FALLA) { Serial.println(F("# No hay falla activa.")); return; }
+    bool era = g_fallaCritica;
     g_estado = EST_IDLE; g_motivoFalla[0] = '\0'; g_vista = V_PRINCIPAL;
-    Serial.println(F("# *** FALLA RECONOCIDA. Salida sigue DESARMADA. ***"));
+    g_fallaCritica = false;
+    prefs.putBool("fcrit", false);
+    prefs.remove ("fmot");
+    Serial.printf("# *** FALLA%s RECONOCIDA. Salida sigue DESARMADA. ***\n",
+                  era ? " CRITICA" : "");
     pitidoOk();
   }
   else if (fijarParametro(c)) { }
@@ -2278,6 +2329,7 @@ void setup() {
 
   cargarParametros();
   g_ventanaEditable = g_par.ventanaMs;
+  restaurarFallaCritica();
 
   if (!LittleFS.begin(true)) Serial.println(F("# [!] LittleFS no disponible."));
 

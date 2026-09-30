@@ -1629,10 +1629,90 @@ Tres, ninguno de los cuales se habría visto sin subir el firmware:
 La pantalla decía `CONSOLA: RESET`, inútil sin PC: el operador tendría que
 cortar la alimentación.
 
-Ahora **una pulsación larga reconoce la falla**. Sigue cumpliendo §7.2 —*"solo
-se sale con reset manual del operador"*— porque mantener pulsado es una acción
-deliberada, no una recuperación automática. Y **reconocer no es rearmar**: la
-salida queda desarmada.
+Se puso que **una pulsación larga reconoce la falla**, con el argumento de que
+mantener pulsado es una acción deliberada y que *reconocer no es rearmar*.
+
+> **Corregido en v1.6.0.** Ese razonamiento estaba mal y el §10.21 explica por
+> qué. Se dejó escrito tal como se decidió, porque el error es parte del
+> registro.
+
+---
+
+## 10.21 Dos niveles de falla (v1.6.0)
+
+El Sr. Carlos hizo la pregunta que destapó el problema: *"si pasa de 128 es
+grave el asunto"*. Lo es, y la v1.5.0 lo trataba igual que a un ciclo que se
+alargó demasiado.
+
+### 10.21.1 Los tres errores de la v1.5.0
+
+**1. "Reconocer no es rearmar" era verdad irrelevante.** Al reconocer, la
+salida sí quedaba desarmada. Pero desde `EST_IDLE` el operador entra a
+MENU → INICIAR CICLO y `lanzarCiclo()` rearma la salida. O sea: pulsación
+larga + menú = ciclo nuevo, sin PC y sin que nadie haya diagnosticado nada.
+La frase describía el instante posterior a la pulsación, no el camino real.
+
+**2. Todas las causas se trataban igual, y no son iguales:**
+
+| Causa | Qué significa | ¿Reiniciar sin diagnóstico? |
+|---|---|---|
+| `T > 128 °C` | El SSR conduce sin orden, o el control se desbocó | **No.** Si el SSR quedó soldado, el ciclo siguiente calienta sin control |
+| Sensor inválido con salida energizada | El control está a ciegas | **No** |
+| SECO con válvula abierta | Se está quemando la resistencia | Solo tras revisar el agua |
+| Sin calentar al 100 % | Idem | Solo tras revisar el agua |
+| Tiempo máximo agotado | Carga grande o ambiente frío | Sí, es legítimo |
+
+**3. El argumento de "sin PC quedarían atrapados" era flojo.** La FALLA corta
+la salida, la olla se enfría sola y la pantalla sigue mostrando el motivo.
+Para sacar la carga no hace falta borrar la falla: se espera, se mira el
+manómetro y se abre. Borrarla solo sirve para **correr otro ciclo**, que es
+justo lo que hay que impedir.
+
+### 10.21.2 Cómo quedó
+
+`latcharFalla(motivo, critica)` es el núcleo común, con dos entradas:
+
+```c
+void entrarEnFalla(const char *motivo)        { latcharFalla(motivo, false); }
+void entrarEnFallaCritica(const char *motivo) { latcharFalla(motivo, true);  }
+```
+
+**FALLA RECUPERABLE** — marcha en seco, tiempo agotado. La causa está afuera
+del equipo. Pulsación larga reconoce, el operador corrige y vuelve a arrancar.
+Pantalla: `*** FALLA ***` / `DEJE PULSADO PARA SALIR`.
+
+**FALLA CRÍTICA** — límite absoluto superado, o sensor ciego con la salida
+energizada. Falló el hardware:
+
+- **No se borra desde el panel.** La pulsación larga suena pero no cede.
+- **Sobrevive al corte de alimentación**: queda grabada en NVS (`fcrit` +
+  `fmot`). Desenchufar y volver a enchufar no la limpia — que era la puerta
+  de atrás que quedaba abierta.
+- Al arrancar, `restaurarFallaCritica()` la recupera, la pantalla de falla
+  manda sobre cualquier vista y `pitidoFalla()` suena solo, porque
+  `estadoPrevio` parte en `EST_IDLE`.
+- Solo sale con `reset` por consola, que limpia el latch. Es decir: cuando
+  alguien con PC ya revisó el SSR y el sensor.
+
+Esto encaja con el modelo de acceso del §10.20.1: el operador no tiene
+consola, el mantenedor sí. Una falla grave deja el equipo detenido hasta que
+lo revise quien puede revisarlo.
+
+`restaurarFallaCritica()` se llama **una sola vez en `setup()`**, no dentro de
+`cargarParametros()`, porque esa función también se invoca al recargar
+parámetros desde el menú y no debe resucitar una falla ya reconocida.
+
+Y `lanzarCiclo()` recibió una red de seguridad redundante:
+
+```c
+if (g_estado == EST_FALLA) {
+  Serial.println(F("# Hay una FALLA activa. No se lanza el ciclo."));
+  return;
+}
+```
+
+No debería alcanzarse nunca —la UI no deja llegar al menú en FALLA— pero es la
+última línea entre una falla en pie y la resistencia energizada.
 
 ---
 
