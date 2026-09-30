@@ -292,7 +292,9 @@ F0 += pow(10.0, (T - 121.1) / 10.0) * dt_minutos;   // z = 10 °C
 La arena es mal conductor térmico y constituye una carga densa. 121 °C en el
 termowell no significa 121 °C en el centro del recipiente de sustrato.
 
-- Capas de máximo 4–5 cm.
+- Capas de máximo 4–5 cm. **El laboratorio trabaja con 20 cm** (§10.16):
+  no invalida el proceso, pero hace imprescindible la validación de
+  penetración para fijar el F₀ objetivo correcto.
 - Sustrato **húmedo**: el vapor no penetra material seco.
 - Tiempos efectivos de 45–60 min en lugar de 20.
 - Validación recomendada una vez: segunda sonda enterrada en el centro de la
@@ -1304,6 +1306,84 @@ No se aplica en `F_CERRAR_VALVULA`, donde superar la ebullición es justamente l
 que se espera al sellar la olla.
 
 Esto cierra lo que §10.4 dejó planteado: el detector consciente de la fase.
+
+---
+
+## 10.16 Práctica real del laboratorio: capas de 20 cm con cinta indicadora
+
+**Dato aportado por el laboratorio (2026-09-30):** no esterilizan en capas de
+5 cm como plantea §5.1, sino en **capas de 20 cm**, colocando cinta indicadora
+en el interior de la carga. La cinta vira, y no han tenido incidencias.
+
+Esto no invalida el proceso, pero conviene entender qué demuestra y qué no.
+
+### Qué prueba la cinta
+
+Clasificación ISO 11140:
+
+| Clase | Qué indica |
+| :--- | :--- |
+| **1 — Proceso** | **Solo exposición al proceso.** La cinta beige de rayas diagonales |
+| 4 — Multivariable | Responde a 2+ variables críticas |
+| 5 — Integrador | Tiempo, temperatura y vapor. Se correlaciona con indicador biológico |
+| 6 — Emulador | Verifica un ciclo concreto |
+| Biológico | Esporas de *G. stearothermophilus*. Patrón de referencia |
+
+**La cinta de rayas es Clase 1: vira a ~121 °C sin componente de tiempo**, en
+segundos. Su propósito declarado es distinguir un bulto procesado de uno sin
+procesar. La norma dice explícitamente que **no es evidencia de esterilización**.
+
+Que vire indica que ese punto **llegó a temperatura en algún momento**. No dice
+cuánto tiempo la mantuvo, que es justo lo que determina la letalidad.
+
+### Por qué el espesor importa
+
+El calor llega al centro del lecho principalmente por conducción, que escala con
+el **cuadrado** de la distancia. Con difusividad térmica de arena húmeda
+(α ≈ 9×10⁻⁷ m²/s) y Fo ≈ 1.2 para equilibrar el centro:
+
+| Espesor | Distancia al centro | Tiempo (solo conducción) |
+| ---: | ---: | ---: |
+| 5 cm | 2.5 cm | ~14 min |
+| **20 cm** | **10 cm** | **~3.7 h** |
+
+> ⚠️ Ese cálculo es el **peor caso**: supone conducción pura. Si el vapor
+> penetra en los poros de la arena húmeda, condensa dentro y entrega calor
+> mucho más rápido. Cuánto más rápido depende del empaque, la humedad y la
+> geometría del recipiente — no se puede calcular, **se mide**.
+
+### Lo que esto NO significa
+
+- **No significa que el proceso actual falle.** Sin incidencias durante un
+  tiempo prolongado es información real, aunque no sea prueba formal.
+- **No obliga a cambiar a capas de 5 cm.**
+
+### Cómo F₀ lo resuelve sin cambiar el proceso
+
+El F₀ que calcula el equipo es el **de la cámara**, medido en el termowell. Si
+el centro de la carga va con retraso, su F₀ es menor — pero la relación entre
+ambos es aproximadamente constante para una carga dada.
+
+**Una vez medida esa relación, basta con subir el F₀ objetivo.** Si el centro
+alcanza F₀ = 12 cuando la cámara marca 20, se fija el objetivo en 33 y el centro
+llega a 20. Es un parámetro del menú, y el laboratorio conserva sus capas de
+20 cm.
+
+### 10.16.1 Esto concreta el paso 8
+
+La validación de penetración deja de ser genérica y pasa a tener un objetivo
+numérico:
+
+1. Segunda sonda enterrada en el **centro geométrico** de la carga habitual
+2. Un ciclo normal registrando ambas temperaturas
+3. Calcular F₀ de las dos curvas
+4. **El cociente es el factor de corrección del F₀ objetivo**
+
+### 10.16.2 Recomendación sobre indicadores rutinarios
+
+Sin cambiar el proceso, sustituir la cinta Clase 1 por **indicadores Clase 5
+(integradores)**, que sí responden a tiempo y temperatura conjuntamente, y usar
+**indicadores biológicos** periódicamente como verificación.
 
 ---
 
