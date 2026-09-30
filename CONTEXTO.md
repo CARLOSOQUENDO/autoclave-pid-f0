@@ -1472,6 +1472,57 @@ térmica de la carga, pero ya no es el camino crítico.
 
 ---
 
+## 10.18 Duración de la purga: por qué 7 min y cómo decidirlo
+
+Pregunta del Sr. Carlos: ¿7 minutos no son demasiado?
+
+**Para la cámara sola, sí sobran.** A 1680 W se generan 0.74 g/s de vapor, que a
+2.1 m³/kg son **1.55 L/s**. Con ~23 L de volumen libre, la cámara se renueva
+cada **15 segundos**: en 7 minutos, **28 renovaciones completas**. Para vaciar
+de aire un recinto vacío, con un minuto sobraría.
+
+**Pero el aire difícil no está en la cámara, está en los poros de la carga.** Un
+lecho de 20 cm de arena no se purga por renovación de volumen sino por difusión
+y flujo a través del lecho. Eso **no se puede calcular**: depende del empaque, la
+humedad y la granulometría.
+
+Dos factores juegan en contra en este equipo:
+
+- **La válvula de purga está en la tapa**, arriba. En un desplazamiento por
+  gravedad bien hecho el drenaje va abajo, porque el aire es más denso y hay que
+  empujarlo hacia abajo. Con la salida arriba, el vapor se escapa
+  preferentemente y el aire puede quedarse debajo.
+- **El estándar para estos recipientes son 10 minutos** (guías de enlatado a
+  presión para All American). §5 decía 7–10; se implementó el extremo corto.
+
+> **La purga insuficiente no falla de forma visible.** No salta ninguna alarma:
+> deja bolsas de aire donde el vapor no penetra, y la PT100 del termowell, que
+> está en la pared, no se entera. Es el modo de falla número uno de esta clase
+> de autoclave precisamente por eso.
+
+Coste: 7 min de un ciclo de ~90, un 8 %.
+
+### 10.18.1 Decisión: medirlo, no adivinarlo
+
+`minutosPurga` pasa a ser **parámetro ajustable** (menú Servicio → Tiempo purga,
+1–20 min, o comando `purga <min>`), guardado en NVS. Por defecto 7.
+
+**El test con indicador biológico (§10.17) también valida la purga:** si un vial
+en el centro de la carga da negativo, la purga fue suficiente para esa carga
+concreta.
+
+Orden de experimentación recomendado:
+
+1. Primer ciclo de validación con **purga = 7 min** y F₀ = 20
+2. Si el vial da **negativo**, la purga es suficiente; se puede explorar bajarla
+3. Si da **positivo**, la purga es lo primero que hay que alargar — antes que
+   subir el F₀, porque una bolsa de aire no se compensa con más tiempo
+
+Ese último punto importa: **más F₀ no arregla una bolsa de aire.** Si el vapor
+no llega, la temperatura local no sube por mucho que se prolongue el ciclo.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa

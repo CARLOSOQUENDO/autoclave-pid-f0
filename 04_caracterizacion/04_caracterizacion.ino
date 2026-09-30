@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.2.0";
+const char *VERSION_FW = "1.3.0";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -228,6 +228,7 @@ struct Parametros {
   float setpoint, f0Objetivo, kp, ki, kd;
   float dutyEnsayo, minutosEnsayo;
   float offsetC;               // correccion contra el patron de laboratorio
+  float minutosPurga;          // duracion de la purga de aire (§5 Fase 1)
   uint32_t ventanaMs;
 } g_par;
 
@@ -268,6 +269,7 @@ void cargarParametros() {
   g_par.dutyEnsayo    = prefs.getFloat("dut",   50.0f);
   g_par.minutosEnsayo = prefs.getFloat("min",   45.0f);
   g_par.offsetC       = prefs.getFloat("off",    0.0f);
+  g_par.minutosPurga  = prefs.getFloat("purga",  7.0f);
   g_par.ventanaMs     = prefs.getUInt ("vent", 2000);
   g_ventanaMs = g_par.ventanaMs;
 
@@ -286,6 +288,7 @@ void guardarParametros() {
   prefs.putFloat("dut",  g_par.dutyEnsayo);
   prefs.putFloat("min",  g_par.minutosEnsayo);
   prefs.putFloat("off",  g_par.offsetC);
+  prefs.putFloat("purga", g_par.minutosPurga);
   prefs.putUInt ("vent", g_par.ventanaMs);
   Serial.println(F("# Parametros guardados en NVS."));
 }
@@ -445,7 +448,20 @@ enum Fase : uint8_t {
 };
 volatile uint8_t g_fase = F_CALENTANDO;
 
-const uint32_t PURGA_MS         = 7UL * 60UL * 1000UL;  // vapor continuo
+// Duracion de la purga, ajustable desde el menu (g_par.minutosPurga).
+//
+// Por defecto 7 min. Para la camara sola eso sobra: a 1680 W se generan 1.55 L/s
+// de vapor y el volumen libre (~23 L) se renueva cada 15 s, o sea 28 veces en
+// 7 minutos. Lo que de verdad cuesta desplazar es el aire atrapado en los poros
+// de la carga, y eso no se calcula: depende del empaque y la humedad.
+//
+// Dos factores juegan en contra aqui: la valvula esta en la TAPA (arriba), no
+// abajo como en un desplazamiento por gravedad bien hecho, y la carga es un
+// lecho de 20 cm. El estandar para estos recipientes son 10 minutos.
+//
+// La purga insuficiente no falla de forma visible: deja bolsas de aire donde el
+// vapor no penetra, y la PT100 del termowell no se entera. Validar con
+// indicador biologico en el centro de la carga (§10.17).
 const float    MARGEN_EBU_C     = 1.0f;   // cuanto antes de la ebullicion contar
 const float    SUBIDA_CIERRE_C  = 2.0f;   // subida que demuestra valvula cerrada
 const uint32_t AVISO_CIERRE_MS  = 5UL * 60UL * 1000UL;  // reaviso si no sube
@@ -537,7 +553,7 @@ int avanzarCiclo(float t) {
         return 0;
       }
       if (t < ebu - MARGEN_EBU_C - 1.0f) { cambiarFase(F_CALENTANDO); return 100; }
-      if (enFase >= PURGA_MS) {
+      if (enFase >= (uint32_t)(g_par.minutosPurga * 60000.0f)) {
         g_tAlCerrar = t;
         g_avisosCierre = 0;
         cambiarFase(F_CERRAR_VALVULA);
@@ -1107,6 +1123,7 @@ const ItemMenu MENU_OPERADOR[] = {
 // Quien no sabe que es Kp no tiene por que tropezarse con ello.
 const ItemMenu MENU_SERVICIO[] = {
   { "Calibracion",    "Ajustar contra el patron",  IT_ACCION, NULL, 0,0,0,0, NULL, AC_CALIBRAR },
+  { "Tiempo purga",   "Barrido de aire, Fase 1",   IT_VALOR, &g_par.minutosPurga,  1,  20, 1.0f, 0, "min", 0 },
   { "Tiempo maximo",  "Corta el ciclo por tiempo", IT_VALOR, &g_par.minutosEnsayo, 5, 240, 5.0f, 0, "min", 0 },
   { "Control Kp",     "Ganancia proporcional",     IT_VALOR, &g_par.kp, 0, 100, 0.1f,   2, NULL, 0 },
   { "Control Ki",     "Ganancia integral",         IT_VALOR, &g_par.ki, 0,  10, 0.001f, 4, NULL, 0 },
@@ -1491,7 +1508,7 @@ void dibujarCiclo() {
     }
 
     case F_PURGA: {
-      uint32_t total = PURGA_MS / 1000;
+      uint32_t total = (uint32_t)(g_par.minutosPurga * 60.0f);
       uint32_t resta = (enFase < total) ? total - enFase : 0;
       pantalla.setFont(u8g2_font_logisoso20_tn);
       snprintf(buf, sizeof(buf), "%lu:%02lu", resta / 60, resta % 60);
@@ -2105,6 +2122,7 @@ bool fijarParametro(const String &c) {
     { "kd",   &g_par.kd,             0.0f,  100.0f, 3 },
     { "sp",   &g_par.setpoint,      20.0f,  135.0f, 1 },
     { "min",  &g_par.minutosEnsayo,  5.0f,  240.0f, 0 },
+    { "purga",&g_par.minutosPurga,   1.0f,   20.0f, 0 },
     { "duty", &g_par.dutyEnsayo,     5.0f,  100.0f, 0 },
     { "f0",   &g_par.f0Objetivo,     1.0f,  120.0f, 0 },
   };
