@@ -1387,6 +1387,91 @@ Sin cambiar el proceso, sustituir la cinta Clase 1 por **indicadores Clase 5
 
 ---
 
+## 10.17 Validación con indicadores biológicos — el mejor camino para el paso 8
+
+El laboratorio dispone de **indicadores biológicos autocontenidos**: viales con
+esporas de *Geobacillus stearothermophilus* en medio con púrpura de bromocresol.
+
+| Tras incubar | Significa |
+| :--- | :--- |
+| **Morado** | Esporas muertas → esterilización lograda |
+| **Amarillo** | Crecieron y acidificaron el medio → **falló** |
+
+Se usa *G. stearothermophilus* porque es más resistente al calor húmedo que
+cualquier contaminante habitual: si mueren esas, muere todo lo demás.
+
+### Por qué es mejor que medir con sonda
+
+La propuesta original (§10.16.1) era medir la temperatura en el centro y
+calcular su F₀. Eso lleva una suposición dentro: que el modelo de letalidad con
+z = 10 °C describe bien lo que ocurre en ese punto.
+
+**El indicador biológico no supone nada.** Integra por sí mismo la penetración
+del vapor, la temperatura real y el tiempo, y devuelve un resultado
+biológicamente significativo. Responde directamente a la pregunta que importa:
+**¿llega la esterilización al centro de una capa de 20 cm?**
+
+### Requisito no negociable: control positivo
+
+> **Incubar siempre un vial sin procesar del mismo lote, junto a los demás.
+> Tiene que virar a AMARILLO.**
+>
+> Si no vira, las esporas ya estaban muertas (lote vencido, mal almacenado) y
+> **el vial morado no significa nada**. Sin control, "morado" puede querer decir
+> "esterilizó" o "el indicador no servía", y no hay forma de distinguirlo.
+
+Incubación a 55–60 °C durante lo que indique el fabricante: 24–48 h los
+clásicos, 1–3 h los de lectura rápida.
+
+### 10.17.1 Ciclo fraccionado: convertir el pasa/no-pasa en un margen
+
+El indicador biológico es **binario**. No dice con cuánto margen se pasó, así
+que se podría estar pasando por poco sin saberlo hasta que un día falle.
+
+**La controladora permite medir ese margen**, porque el F₀ objetivo es un
+parámetro ajustable — algo que un autoclave de temporizador no puede hacer
+con precisión:
+
+```
+Ciclo 1:  F0 objetivo = 20  ->  vial morado (esperado)
+Ciclo 2:  F0 objetivo = 14  ->  ¿sigue morado?
+Ciclo 3:  F0 objetivo = 10  ->  ¿aquí vira?
+```
+
+**La distancia entre el umbral donde empieza a fallar y los 20 de trabajo es el
+margen de seguridad, medido en lugar de supuesto.** Es la técnica del ciclo
+fraccionado que se usa en validación formal.
+
+Referencia: con 10⁶ esporas y D₁₂₁ ≈ 2 min, el vial necesita **F₀ ≈ 12** en su
+posición para dar negativo. Si a F₀ de cámara = 12 el vial sigue morado, el
+centro de la carga está recibiendo al menos esa letalidad.
+
+### 10.17.2 Protocolo propuesto para el paso 8
+
+1. Vial en el **centro geométrico** de una carga habitual de 20 cm
+2. Un vial sin procesar como **control positivo**
+3. Ciclo normal con F₀ objetivo = 20
+4. Incubar ambos a 55–60 °C
+5. Repetir con F₀ objetivo decreciente hasta encontrar el umbral de fallo
+6. Fijar el F₀ de trabajo con margen sobre ese umbral
+
+Conviene además **repetir tres ciclos consecutivos** en la configuración final,
+que es lo habitual en validación.
+
+### 10.17.3 Qué sustituye y qué no
+
+| Herramienta | Qué aporta |
+| :--- | :--- |
+| Cinta Clase 1 (§10.16) | Solo distingue procesado de no procesado. **No es evidencia de esterilización** |
+| Indicador biológico | **Prueba de esterilización** en el punto donde se coloca |
+| Sonda de penetración | Da el número (retraso térmico y F₀ del centro), útil pero prescindible si hay biológicos |
+
+Con indicadores biológicos y ciclo fraccionado, **la sonda de penetración deja
+de ser necesaria** para validar. Seguiría siendo útil para entender la dinámica
+térmica de la carga, pero ya no es el camino crítico.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa
