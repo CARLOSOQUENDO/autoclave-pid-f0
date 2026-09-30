@@ -1546,6 +1546,96 @@ aquella para la que se fijó el F₀ objetivo.
 ---
 
 
+## 10.20 Interfaz revisada con el operador real (v1.5.0)
+
+Revisión completa de textos y menús tras varios ciclos, hecha con el simulador
+`herramientas/simular_pantallas.py` en vez de compilando y subiendo cada vez.
+
+### 10.20.1 Menú reducido a lo esencial
+
+Petición del Sr. Carlos: *"no quiero dejar puertas abiertas para que algún
+operador inquieto cambie cosas críticas"*. Empezó pidiendo quitar la
+calibración; se amplió porque **quitar solo eso se quedaba corto**:
+
+| Opción | Riesgo si alguien la toca |
+| :--- | :--- |
+| **MODO MANUAL** | Aplica calor **sin control de F₀ ni setpoint** |
+| **ENSAYO ESCALON** | Duty fijo, sin más límite que los 128 °C |
+| CONTROL KP / KI / KD | Rompe el lazo |
+| VENTANA PWM | Rompe la salida |
+| CALIBRACION | Falsea la temperatura, y con ella el F₀ |
+| **LETALIDAD F0** | **El ajuste más consecuente del equipo**: bajarlo de 20 a 5 sub-esteriliza sin que nada lo delate |
+
+Modo manual y ensayo escalón son **más peligrosos que la calibración**, porque
+aplican calor sin la gobernanza del ciclo. Y `LETALIDAD F0` estaba en el menú
+del operador, a dos clics.
+
+**El menú del operador queda en tres entradas:** INICIAR CICLO, INFORMACION,
+VOLVER. Todo lo demás pasa a la consola, que exige un PC y por tanto la
+presencia del técnico.
+
+**Ver sin poder cambiar:** los parámetros del ciclo se muestran en INFORMACION
+en solo lectura (`CICLO 121.0 C / F0 20 MIN`), para que el operador pueda
+verificar la configuración antes de cargar.
+
+**Las herramientas no se pierden.** La consola hace de llave y la pantalla sigue
+siendo la herramienta: `calibrar` abre la pantalla de calibración en el equipo,
+`manual` el modo manual, `escalon` el ensayo. Dialar un offset mirando el valor
+crudo y el corregido a la vez sigue siendo mejor que teclear un número a ciegas.
+
+### 10.20.2 Lenguaje: todo en mayúsculas, sin jerga
+
+Estandarizado a mayúsculas. Argumento que decidió la cuestión: **el texto va sin
+tildes** por seguridad de codificación en el fuente, y en minúscula "valvula"
+parece un error de digitación, mientras que **en mayúscula se lee como
+etiquetado de instrumento**. El reparo clásico de que las mayúsculas se leen más
+lento no aplica a etiquetas de 25 caracteres, y el de que "si todo es mayúscula
+nada resalta" tampoco: **el énfasis lo llevan las cajas invertidas y el
+parpadeo**, no la capitalización.
+
+Jerga retirada:
+
+| Antes | Ahora |
+| :--- | :--- |
+| `SP 121.0` | `META 121.0` |
+| `RAMPA` (nombre de fase) | `PRESURIZANDO` — el operador puede verificarlo en el manómetro |
+| `Consigna de la meseta` | `TEMPERATURA DE TRABAJO` |
+| `Se detecta al subir la T` | *(retirado: basta la orden)* |
+| `1.05 min/min` | `SUMA 1.05 F0 POR MINUTO` |
+| `carga como la validada` | *(retirado del checklist)* |
+
+Checklist final, seis puntos: VALVULA DE PURGA ABIERTA · NIVEL DE AGUA ALTO,
+RESISTENCIA CUBIERTA · VALVULA DE SEGURIDAD LIBRE Y SIN OBSTRUIR · TAPA BIEN
+CERRADA Y ASEGURADA · **SUSTRATO HUMEDO, SECO NO SE ESTERILIZA** · VOY A ESTAR
+PRESENTE TODO EL CICLO.
+
+Ese quinto punto ahora dice **por qué** importa, en lugar de ser una orden sin
+razón.
+
+### 10.20.3 Errores que encontró el simulador
+
+Tres, ninguno de los cuales se habría visto sin subir el firmware:
+
+1. **Texto solapado en la purga**: dos líneas a `y=58` y `y=62`, 4 px de
+   separación con fuente de 8 px de alto.
+2. **Confirmación desbordada**: `ESTERILIZACION A 121 C?` medía 138 px de los
+   128 disponibles. Reemplazada por `INICIAR CICLO A / 121 C / F0 20 MIN`, que
+   además confirma **los dos** parámetros del ciclo, no solo la temperatura.
+3. **Motivo de falla partido a mitad de palabra**: `SUPERA LIMITE 1` / `28 C`.
+   Ahora se parte por el espacio más cercano.
+
+### 10.20.4 La FALLA se reconoce desde el encoder
+
+La pantalla decía `CONSOLA: RESET`, inútil sin PC: el operador tendría que
+cortar la alimentación.
+
+Ahora **una pulsación larga reconoce la falla**. Sigue cumpliendo §7.2 —*"solo
+se sale con reset manual del operador"*— porque mantener pulsado es una acción
+deliberada, no una recuperación automática. Y **reconocer no es rearmar**: la
+salida queda desarmada.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa

@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.3.1";
+const char *VERSION_FW = "1.5.0";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -497,7 +497,7 @@ const char *nombreFase(uint8_t f) {
     case F_CALENTANDO:     return "CALENTANDO";
     case F_PURGA:          return "PURGA";
     case F_CERRAR_VALVULA: return "CERRAR VALVULA";
-    case F_RAMPA:          return "RAMPA";
+    case F_RAMPA:          return "PRESURIZANDO";
     case F_MESETA:         return "ESTERILIZANDO";
     case F_TERMINADO:      return "ENFRIANDO";
     default:               return "DESPRESURIZADO";
@@ -1116,39 +1116,29 @@ struct ItemMenu {
 
 float g_ventanaEditable = 2000;
 
-// Menu del OPERADOR: lenguaje llano, solo lo que un microbiologo necesita para
-// lanzar y parametrizar un ciclo. Nada de jerga de control.
+// Menu del OPERADOR: SOLO lo esencial.
+//
+// Todo lo que puede alterar el proceso vive en la consola, que exige un PC y
+// por tanto la presencia del tecnico. La razon no es desconfianza: es que
+// varias de esas opciones no avisan cuando se tuercen.
+//
+//   MODO MANUAL y ENSAYO ESCALON aplican calor sin la gobernanza del ciclo.
+//   KP/KI/KD y VENTANA PWM rompen el lazo de control.
+//   CALIBRACION falsea la temperatura medida, y con ella el F0.
+//   LETALIDAD F0 es el ajuste mas consecuente del equipo: bajarlo de 20 a 5
+//   sub-esteriliza sin que nada lo delate.
+//
+// El operador SI puede verificar los parametros: se muestran en INFORMACION,
+// en solo lectura. Ver sin poder cambiar.
 const ItemMenu MENU_OPERADOR[] = {
-  { "Iniciar ciclo", "Arranca la esterilizacion", IT_ACCION,  NULL, 0,0,0,0, NULL, AC_INICIAR_PID },
-  { "Temperatura",   "Consigna de la meseta",     IT_VALOR, &g_par.setpoint,   50, 135, 0.5f, 1, "C",   0 },
-  { "Letalidad F0",  "Min. equivalentes a 121C",  IT_VALOR, &g_par.f0Objetivo,  1, 120, 1.0f, 0, "min", 0 },
-  { "Servicio",      "Ajustes tecnicos",          IT_SUBMENU, NULL, 0,0,0,0, NULL, 1 },
-  { "Informacion",   "Version del equipo",        IT_ACCION,  NULL, 0,0,0,0, NULL, AC_INFO },
-  { "Volver",        "Salir al panel principal",  IT_ACCION,  NULL, 0,0,0,0, NULL, AC_VOLVER },
-};
-
-// Menu de SERVICIO: lo tecnico y las herramientas de puesta en marcha.
-// Quien no sabe que es Kp no tiene por que tropezarse con ello.
-const ItemMenu MENU_SERVICIO[] = {
-  { "Calibracion",    "Ajustar contra el patron",  IT_ACCION, NULL, 0,0,0,0, NULL, AC_CALIBRAR },
-  { "Tiempo maximo",  "Corta el ciclo por tiempo", IT_VALOR, &g_par.minutosEnsayo, 5, 240, 5.0f, 0, "min", 0 },
-  { "Control Kp",     "Ganancia proporcional",     IT_VALOR, &g_par.kp, 0, 100, 0.1f,   2, NULL, 0 },
-  { "Control Ki",     "Ganancia integral",         IT_VALOR, &g_par.ki, 0,  10, 0.001f, 4, NULL, 0 },
-  { "Control Kd",     "Ganancia derivativa",       IT_VALOR, &g_par.kd, 0, 100, 0.1f,   2, NULL, 0 },
-  { "Ventana PWM",    "Periodo de ciclo del SSR",  IT_VALOR, &g_ventanaEditable, 500, 10000, 100.0f, 0, "ms", 0 },
-  { "Ensayo escalon", "Caracterizacion de planta", IT_ACCION, NULL, 0,0,0,0, NULL, AC_INICIAR_ENSAYO },
-  { "Salida ensayo",  "Potencia del escalon",      IT_VALOR, &g_par.dutyEnsayo, 5, 100, 5.0f, 0, "%", 0 },
-  { "Ver resultados", "L, tau y K del ultimo",     IT_ACCION, NULL, 0,0,0,0, NULL, AC_RESULTADOS },
-  { "Modo manual",    "Salida manual de pruebas",  IT_ACCION, NULL, 0,0,0,0, NULL, AC_MANUAL },
-  { "Probar sonido",  "Comprueba el zumbador",     IT_ACCION, NULL, 0,0,0,0, NULL, AC_BUZZER },
-  { "Guardar",        "Graba en memoria",          IT_ACCION, NULL, 0,0,0,0, NULL, AC_GUARDAR },
-  { "Volver",         "Vuelve al menu anterior",   IT_ACCION, NULL, 0,0,0,0, NULL, AC_VOLVER },
+  { "INICIAR CICLO", "ARRANCA LA ESTERILIZACION", IT_ACCION, NULL, 0,0,0,0, NULL, AC_INICIAR_PID },
+  { "INFORMACION",   "VERSION Y PARAMETROS",      IT_ACCION, NULL, 0,0,0,0, NULL, AC_INFO },
+  { "VOLVER",        "SALIR AL PANEL PRINCIPAL",  IT_ACCION, NULL, 0,0,0,0, NULL, AC_VOLVER },
 };
 
 struct Menu { const char *titulo; const ItemMenu *items; uint8_t n; int8_t padre; };
 const Menu MENUS[] = {
-  { "MENU",     MENU_OPERADOR, sizeof(MENU_OPERADOR)/sizeof(ItemMenu), -1 },
-  { "SERVICIO", MENU_SERVICIO, sizeof(MENU_SERVICIO)/sizeof(ItemMenu),  0 },
+  { "MENU", MENU_OPERADOR, sizeof(MENU_OPERADOR)/sizeof(ItemMenu), -1 },
 };
 const uint8_t N_MENUS = sizeof(MENUS)/sizeof(Menu);
 
@@ -1166,12 +1156,12 @@ bool    g_arrancandoPID = false;   // que se esta confirmando: escalon o PID
 
 struct PuntoChecklist { const char *l1, *l2; };
 const PuntoChecklist CHECKLIST[] = {
-  { "VALVULA DE PURGA",     "ABIERTA para la purga"  },
-  { "Nivel de agua OK y",   "resistencia sumergida"  },
-  { "Valvula de seguridad", "libre y sin obstruir"   },
-  { "Tapa asegurada y",     "correctamente sellada"  },
-  { "Sustrato HUMEDO y",    "carga como la validada" },
-  { "Voy a permanecer",     "presente todo el ciclo" },
+  { "VALVULA DE PURGA",     "ABIERTA"                },
+  { "NIVEL DE AGUA ALTO,",  "RESISTENCIA CUBIERTA"   },
+  { "VALVULA DE SEGURIDAD", "LIBRE Y SIN OBSTRUIR"   },
+  { "TAPA BIEN CERRADA",    "Y ASEGURADA"            },
+  { "SUSTRATO HUMEDO",      "SECO NO SE ESTERILIZA"  },
+  { "VOY A ESTAR PRESENTE", "TODO EL CICLO"          },
 };
 const uint8_t N_CHECKLIST = sizeof(CHECKLIST)/sizeof(PuntoChecklist);
 
@@ -1179,7 +1169,7 @@ const uint8_t N_CHECKLIST = sizeof(CHECKLIST)/sizeof(PuntoChecklist);
 void dibujarPrincipal() {
   char buf[24];
   pantalla.setFont(u8g2_font_6x10_tf);
-  pantalla.drawStr(0, 8, g_salidaArmada ? "ARMADA" : "desarmada");
+  pantalla.drawStr(0, 8, g_salidaArmada ? "ACTIVA" : "EN REPOSO");
   const char *e = g_sensorValido ? "OK" : "---";
   pantalla.drawStr(128 - pantalla.getStrWidth(e), 8, e);
   pantalla.drawHLine(0, 11, 128);
@@ -1192,7 +1182,7 @@ void dibujarPrincipal() {
   pantalla.setFont(u8g2_font_6x10_tf);
   pantalla.drawStr(64 + (a + 14)/2 - 12, 30, "C");
 
-  snprintf(buf, sizeof(buf), "SP %.1f", g_par.setpoint);
+  snprintf(buf, sizeof(buf), "META %.1f", g_par.setpoint);
   pantalla.drawStr(0, 50, buf);
   snprintf(buf, sizeof(buf), "%3d%%", g_dutyComandado);
   pantalla.drawStr(128 - pantalla.getStrWidth(buf), 50, buf);
@@ -1217,18 +1207,28 @@ void dibujarFalla() {
   pantalla.drawStr(3, 12, "*** FALLA ***");
   pantalla.setDrawColor(1);
 
-  // El motivo puede no caber en una linea: se parte en dos
+  // El motivo puede no caber en una linea. Se parte por un ESPACIO, no a los
+  // 25 caracteres exactos: cortar "LIMITE 128 C" como "LIMITE 1" / "28 C"
+  // obliga al operador a reconstruir mentalmente lo que lee.
   pantalla.setFont(u8g2_font_5x8_tf);
   char l1[27] = "", l2[27] = "";
   size_t n = strlen(g_motivoFalla);
-  if (n <= 25) strncpy(l1, g_motivoFalla, 26);
-  else { strncpy(l1, g_motivoFalla, 25); strncpy(l2, g_motivoFalla + 25, 25); }
+  if (n <= 25) {
+    strncpy(l1, g_motivoFalla, 26);
+  } else {
+    int corte = 25;
+    while (corte > 10 && g_motivoFalla[corte] != ' ') corte--;
+    if (corte <= 10) corte = 25;          // sin espacio util, se corta igual
+    strncpy(l1, g_motivoFalla, corte);
+    l1[corte] = '\0';
+    strncpy(l2, g_motivoFalla + corte + 1, 25);
+  }
   pantalla.drawStr(0, 28, l1);
   pantalla.drawStr(0, 38, l2);
 
   pantalla.drawHLine(0, 44, 128);
-  pantalla.drawStr(0, 54, "Salida cortada.");
-  pantalla.drawStr(0, 62, "Consola: reset");
+  pantalla.drawStr(0, 54, "SALIDA CORTADA");
+  pantalla.drawStr(0, 62, "DEJE PULSADO PARA SALIR");
 }
 
 void dibujarMenu() {
@@ -1307,18 +1307,21 @@ void dibujarConfirmar() {
   pantalla.drawStr(0, 8, "CONFIRMAR");
   pantalla.drawHLine(0, 11, 128);
   if (g_arrancandoPID) {
-    pantalla.drawStr(0, 24, "Iniciar ciclo de");
-    snprintf(buf, sizeof(buf), "esterilizacion a %.0f C?", g_par.setpoint);
+    // Se confirman los DOS parametros del ciclo, no solo la temperatura: el
+    // F0 objetivo es el que decide cuando termina, asi que debe verse aqui.
+    pantalla.drawStr(0, 24, "INICIAR CICLO A");
+    snprintf(buf, sizeof(buf), "%.0f C  /  F0 %.0f MIN",
+             g_par.setpoint, g_par.f0Objetivo);
     pantalla.drawStr(0, 35, buf);
   } else {
     snprintf(buf, sizeof(buf), "Ensayo %d%% / %d min",
              (int)g_par.dutyEnsayo, (int)g_par.minutosEnsayo);
     pantalla.drawStr(0, 24, buf);
-    pantalla.drawStr(0, 35, "Energiza la resistencia");
+    pantalla.drawStr(0, 35, "ENERGIZA LA RESISTENCIA");
   }
   dibujarSiNo(51);
   pantalla.setFont(u8g2_font_5x8_tf);
-  const char *p = "girar elige | clic acepta";
+  const char *p = "GIRAR ELIGE | CLIC ACEPTA";
   pantalla.drawStr(64 - pantalla.getStrWidth(p)/2, 63, p);
 }
 
@@ -1334,7 +1337,7 @@ void dibujarChecklist() {
   if (p.l2[0]) pantalla.drawStr(0, 36, p.l2);
   dibujarSiNo(51);
   pantalla.setFont(u8g2_font_5x8_tf);
-  const char *t = "NO cancela el ensayo";
+  const char *t = "NO CANCELA EL CICLO";
   pantalla.drawStr(64 - pantalla.getStrWidth(t)/2, 63, t);
 }
 
@@ -1457,11 +1460,11 @@ void dibujarCalibracion() {
   pantalla.drawHLine(0, 11, 128);
 
   pantalla.setFont(u8g2_font_5x8_tf);
-  pantalla.drawStr(0, 21, "Sin corregir");
+  pantalla.drawStr(0, 21, "SIN CORREGIR");
   snprintf(buf, sizeof(buf), "%.2f C", g_tCruda);
   pantalla.drawStr(128 - pantalla.getStrWidth(buf), 21, buf);
 
-  pantalla.drawStr(0, 31, "Offset");
+  pantalla.drawStr(0, 31, "OFFSET");
   snprintf(buf, sizeof(buf), "%+.2f C", g_par.offsetC);
   pantalla.drawStr(128 - pantalla.getStrWidth(buf), 31, buf);
 
@@ -1469,7 +1472,7 @@ void dibujarCalibracion() {
 
   // El valor corregido, grande: es el que debe igualar al patron
   pantalla.setFont(u8g2_font_5x8_tf);
-  pantalla.drawStr(0, 45, "Igualar al patron:");
+  pantalla.drawStr(0, 45, "IGUALAR AL PATRON:");
   snprintf(buf, sizeof(buf), "%.2f", g_temperatura);
   pantalla.setFont(u8g2_font_logisoso20_tn);
   pantalla.drawStr(128 - pantalla.getStrWidth(buf) - 16, 62, buf);
@@ -1477,8 +1480,8 @@ void dibujarCalibracion() {
   pantalla.drawStr(114, 54, "C");
 
   pantalla.setFont(u8g2_font_5x8_tf);
-  pantalla.drawStr(0, 62, "girar");
-  pantalla.drawStr(0, 54, "clic=ok");
+  pantalla.drawStr(0, 62, "GIRAR");
+  pantalla.drawStr(0, 54, "CLIC=OK");
 }
 
 // Pantalla del ciclo. Cada fase muestra lo que el operador necesita en ESE
@@ -1507,14 +1510,14 @@ void dibujarCiclo() {
       snprintf(buf, sizeof(buf), "%.1f", g_temperatura);
       pantalla.drawStr(2, 36, buf);
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "hierve a %.1f", puntoEbullicion());
+      snprintf(buf, sizeof(buf), "HIERVE A %.1f", puntoEbullicion());
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 24, buf);
       pantalla.drawStr(128 - pantalla.getStrWidth("100%"), 34, "100%");
       pantalla.drawHLine(0, 42, 128);
       pantalla.setFont(u8g2_font_6x10_tf);
       pantalla.drawStr(0, 53, "VALVULA ABIERTA");
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 63, "Espere a la ebullicion");
+      pantalla.drawStr(0, 63, "ESPERE A LA EBULLICION");
       break;
     }
 
@@ -1537,8 +1540,8 @@ void dibujarCiclo() {
 
       // Dos lineas con 9 px de separacion: con la fuente 5x8 no se solapan
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 54, "Debe salir vapor continuo");
-      pantalla.drawStr(0, 63, "por la valvula abierta");
+      pantalla.drawStr(0, 54, "DEBE SALIR VAPOR CONTINUO");
+      pantalla.drawStr(0, 63, "POR LA VALVULA ABIERTA");
       break;
     }
 
@@ -1550,15 +1553,14 @@ void dibujarCiclo() {
       pantalla.setDrawColor(1);
 
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "%.1f C   purga completa", g_temperatura);
+      snprintf(buf, sizeof(buf), "%.1f C   PURGA LISTA", g_temperatura);
       pantalla.drawStr(0, 41, buf);
       if (g_avisosCierre > 0) {
-        snprintf(buf, sizeof(buf), "NO sube la T. Aviso %u", g_avisosCierre);
+        snprintf(buf, sizeof(buf), "LA TEMPERATURA NO SUBE %u", g_avisosCierre);
         pantalla.drawStr(0, 52, buf);
-        pantalla.drawStr(0, 62, "Sigue abierta la valvula?");
+        pantalla.drawStr(0, 62, "SIGUE ABIERTA LA VALVULA?");
       } else {
-        pantalla.drawStr(0, 52, "Cierre la valvula ahora.");
-        pantalla.drawStr(0, 62, "Se detecta al subir la T");
+        pantalla.drawStr(0, 54, "CIERRE LA VALVULA AHORA");
       }
       break;
     }
@@ -1568,14 +1570,15 @@ void dibujarCiclo() {
       snprintf(buf, sizeof(buf), "%.1f", g_temperatura);
       pantalla.drawStr(2, 36, buf);
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "meta %.1f", g_par.setpoint);
+      snprintf(buf, sizeof(buf), "META %.1f", g_par.setpoint);
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 24, buf);
       pantalla.drawStr(128 - pantalla.getStrWidth("100%"), 34, "100%");
       pantalla.drawHLine(0, 42, 128);
       pantalla.setFont(u8g2_font_6x10_tf);
-      pantalla.drawStr(0, 53, "Valvula cerrada OK");
+      pantalla.drawStr(0, 53, "VALVULA CERRADA OK");
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 63, "Subiendo a la consigna");
+      snprintf(buf, sizeof(buf), "SUBIENDO A %.0f C", g_par.setpoint);
+      pantalla.drawStr(0, 63, buf);
       break;
     }
 
@@ -1585,7 +1588,7 @@ void dibujarCiclo() {
       pantalla.drawStr(2, 34, buf);
 
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "SP %.1f", g_par.setpoint);
+      snprintf(buf, sizeof(buf), "META %.1f", g_par.setpoint);
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 22, buf);
       snprintf(buf, sizeof(buf), "%d%%", g_dutyComandado);
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 32, buf);
@@ -1602,7 +1605,7 @@ void dibujarCiclo() {
 
       pantalla.setFont(u8g2_font_5x8_tf);
       float tasa = powf(10.0f, (g_temperatura - 121.1f) / 10.0f);
-      snprintf(buf, sizeof(buf), "%.2f min/min", tasa);
+      snprintf(buf, sizeof(buf), "SUMA %.2f F0 POR MINUTO", tasa);
       pantalla.drawStr(0, 63, buf);
       break;
     }
@@ -1616,7 +1619,7 @@ void dibujarCiclo() {
       pantalla.drawHLine(0, 41, 128);
 
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 50, "NO ABRIR - aun hay presion");
+      pantalla.drawStr(0, 50, "NO ABRIR: AUN HAY PRESION");
       snprintf(buf, sizeof(buf), "%.1f C  ->  aviso a %.0f C",
                g_temperatura, T_DESPRESURIZADO_C);
       pantalla.drawStr(0, 59, buf);
@@ -1660,8 +1663,8 @@ void dibujarResultados() {
 
   if (!g_res.valido) {
     pantalla.setFont(u8g2_font_7x13_tf);
-    pantalla.drawStr(0, 30, "Sin ensayo");
-    pantalla.drawStr(0, 44, "valido aun");
+    pantalla.drawStr(0, 30, "SIN ENSAYO");
+    pantalla.drawStr(0, 44, "VALIDO AUN");
     return;
   }
   pantalla.setFont(u8g2_font_7x13_tf);
@@ -1683,14 +1686,23 @@ void dibujarInfo() {
   pantalla.drawStr(0, 8, "INFORMACION");
   pantalla.drawHLine(0, 11, 128);
   pantalla.setFont(u8g2_font_7x13_tf);
-  pantalla.drawStr(2, 25, "PID AUTOCLAVE");
-  pantalla.setFont(u8g2_font_6x10_tf);
-  pantalla.drawStr(2, 36, "All American 75X");
-  snprintf(buf, sizeof(buf), "Firmware %s", VERSION_FW);
-  pantalla.drawStr(2, 46, buf);
-  pantalla.drawHLine(0, 50, 128);
+  pantalla.drawStr(2, 23, "PID AUTOCLAVE 75X");
+  pantalla.setFont(u8g2_font_5x8_tf);
+  snprintf(buf, sizeof(buf), "FIRMWARE %s", VERSION_FW);
+  pantalla.drawStr(2, 33, buf);
+  // Parametros del ciclo en SOLO LECTURA: el operador puede verificar que el
+  // equipo esta configurado como debe antes de cargar, sin poder cambiarlo.
+  snprintf(buf, sizeof(buf), "CICLO %.1f C / F0 %.0f MIN",
+           g_par.setpoint, g_par.f0Objetivo);
+  pantalla.drawStr(2, 42, buf);
+  // La altitud y el punto de ebullicion no son adorno: son lo que distingue a
+  // este equipo de uno calibrado a nivel del mar, y explican por que hacen
+  // falta 17.5 psi para 121 C en lugar de los 15 que dice el manometro.
+  snprintf(buf, sizeof(buf), "%.0f m - HIERVE A %.1f C", ALTITUD_M, puntoEbullicion());
+  pantalla.drawStr(2, 50, buf);
+  pantalla.drawHLine(0, 53, 128);
   pantalla.setFont(u8g2_font_7x13_tf);
-  pantalla.drawStr(128 - pantalla.getStrWidth(AUTOR_FW) - 3, 62, AUTOR_FW);
+  pantalla.drawStr(128 - pantalla.getStrWidth(AUTOR_FW) - 3, 64, AUTOR_FW);
 }
 
 void dibujarManual() {
@@ -1700,18 +1712,18 @@ void dibujarManual() {
   pantalla.drawHLine(0, 11, 128);
   if (!g_salidaArmada) {
     pantalla.setFont(u8g2_font_7x13_tf);
-    pantalla.drawStr(0, 27, "Salida");
-    pantalla.drawStr(0, 41, "DESARMADA");
+    pantalla.drawStr(0, 27, "SALIDA");
+    pantalla.drawStr(0, 41, "EN REPOSO");
     pantalla.setFont(u8g2_font_5x8_tf);
-    pantalla.drawStr(0, 52, "Consola: armar");
-    pantalla.drawStr(0, 62, "pulsacion larga = salir");
+    pantalla.drawStr(0, 52, "CONSOLA: ARMAR");
+    pantalla.drawStr(0, 62, "PULSACION LARGA = SALIR");
     return;
   }
   snprintf(buf, sizeof(buf), "%d", g_dutyComandado);
   pantalla.setFont(u8g2_font_logisoso20_tn);
   pantalla.drawStr(50 - pantalla.getStrWidth(buf)/2, 38, buf);
   pantalla.setFont(u8g2_font_7x13_tf);
-  pantalla.drawStr(74, 38, "% salida");
+  pantalla.drawStr(74, 38, "% SALIDA");
   pantalla.drawFrame(0, 44, 128, 9);
   int w = (g_dutyComandado * 126)/100;
   if (w > 0) pantalla.drawBox(1, 45, w, 7);
@@ -1877,7 +1889,21 @@ void aplicarGiro(int giro) {
 }
 
 void aplicarPulsacion(int tipo) {
-  if (g_estado == EST_FALLA) return;             // solo se sale con 'reset'
+  if (g_estado == EST_FALLA) {
+    // §7.2 exige que la FALLA sea terminal y que solo se salga por accion
+    // deliberada del operador. Una pulsacion LARGA lo es. Sin esto, sin PC
+    // delante habria que cortar la alimentacion, que es peor: se pierde el
+    // contexto y el operador puede no saber que debe hacerlo.
+    // Reconocer NO es rearmar: la salida sigue desarmada al salir.
+    if (tipo == 2) {
+      g_estado = EST_IDLE;
+      g_motivoFalla[0] = '\0';
+      g_vista = V_PRINCIPAL;
+      Serial.println(F("# FALLA reconocida desde el encoder. Salida sigue desarmada."));
+      pitidoOk();
+    }
+    return;
+  }
 
   if (tipo == 2) {                               // larga = atras / abortar
     switch (g_vista) {
@@ -2015,7 +2041,7 @@ void mostrarEstado() {
   Serial.println(F("# --- ESTADO ---"));
   Serial.printf("# Estado      : %s %s\n", e, g_motivoFalla);
   Serial.printf("# Salida      : %s  duty %d %% (real %.2f %%)\n",
-                g_salidaArmada ? "ARMADA" : "desarmada", g_dutyComandado, g_dutyReal);
+                g_salidaArmada ? "ACTIVA" : "EN REPOSO", g_dutyComandado, g_dutyReal);
   Serial.printf("# Temperatura : %.3f C corregida  (cruda %.3f, offset %+.2f)\n",
                 g_temperatura, g_tCruda, g_par.offsetC);
   Serial.printf("# Sensor      : [%s] %s\n", g_sensorValido ? "OK" : "NO VALIDA", g_avisoSensor);
@@ -2161,7 +2187,8 @@ bool fijarParametro(const String &c) {
 }
 
 void ayuda() {
-  Serial.println(F("# Comandos: estado | diag | cal <C> | regs | bias on|off | armar |"));
+  Serial.println(F("# Comandos: estado | diag | cal <C> | calibrar | manual | escalon |"));
+  Serial.println(F("#           sonido | regs | bias on|off | armar |"));
   Serial.println(F("#           desarmar | parar | resultados | volcar | borrar | reset | help"));
   Serial.println(F("# Parametros: kp | ki | kd | sp | min | duty | f0  <valor>"));
   Serial.println(F("# El ensayo se lanza desde el MENU con el encoder."));
@@ -2188,6 +2215,17 @@ void procesarComando(String c) {
   }
   else if (c == "estado")     mostrarEstado();
   else if (c == "diag")       cmdDiag();
+  // La consola abre las pantallas que se retiraron del menu. Sigue haciendo
+  // falta un PC para llegar a ellas, que es justo el control que se buscaba.
+  else if (c == "calibrar")   { g_vista = V_CALIBRACION;
+                                Serial.println(F("# Pantalla de calibracion abierta en el equipo.")); }
+  else if (c == "manual")     { g_vista = V_MANUAL;
+                                Serial.println(F("# Modo manual abierto. Usa 'armar' para habilitar.")); }
+  else if (c == "escalon")    { if (!g_sensorValido) { Serial.println(F("# [!] Sensor sin lectura valida.")); }
+                                else { g_arrancandoPID = false; g_siNo = 0;
+                                       g_vista = V_CONFIRMAR;
+                                       Serial.println(F("# Ensayo de escalon: confirma en el equipo.")); } }
+  else if (c == "sonido")     { pitidoOk(); delay(300); pitidoAviso(); delay(300); avisoAccion(); }
   else if (c.startsWith("cal ")) {
     float v = c.substring(4).toFloat();
     if (v > OFFSET_MAX_C || v < -OFFSET_MAX_C) {
