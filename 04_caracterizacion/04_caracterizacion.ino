@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.3.0";
+const char *VERSION_FW = "1.3.1";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -228,7 +228,6 @@ struct Parametros {
   float setpoint, f0Objetivo, kp, ki, kd;
   float dutyEnsayo, minutosEnsayo;
   float offsetC;               // correccion contra el patron de laboratorio
-  float minutosPurga;          // duracion de la purga de aire (§5 Fase 1)
   uint32_t ventanaMs;
 } g_par;
 
@@ -269,7 +268,6 @@ void cargarParametros() {
   g_par.dutyEnsayo    = prefs.getFloat("dut",   50.0f);
   g_par.minutosEnsayo = prefs.getFloat("min",   45.0f);
   g_par.offsetC       = prefs.getFloat("off",    0.0f);
-  g_par.minutosPurga  = prefs.getFloat("purga",  7.0f);
   g_par.ventanaMs     = prefs.getUInt ("vent", 2000);
   g_ventanaMs = g_par.ventanaMs;
 
@@ -288,7 +286,6 @@ void guardarParametros() {
   prefs.putFloat("dut",  g_par.dutyEnsayo);
   prefs.putFloat("min",  g_par.minutosEnsayo);
   prefs.putFloat("off",  g_par.offsetC);
-  prefs.putFloat("purga", g_par.minutosPurga);
   prefs.putUInt ("vent", g_par.ventanaMs);
   Serial.println(F("# Parametros guardados en NVS."));
 }
@@ -448,20 +445,21 @@ enum Fase : uint8_t {
 };
 volatile uint8_t g_fase = F_CALENTANDO;
 
-// Duracion de la purga, ajustable desde el menu (g_par.minutosPurga).
+// Duracion de la purga: FIJA en 7 minutos, deliberadamente NO ajustable.
 //
-// Por defecto 7 min. Para la camara sola eso sobra: a 1680 W se generan 1.55 L/s
-// de vapor y el volumen libre (~23 L) se renueva cada 15 s, o sea 28 veces en
-// 7 minutos. Lo que de verdad cuesta desplazar es el aire atrapado en los poros
-// de la carga, y eso no se calcula: depende del empaque y la humedad.
+// Para la camara sola sobra: a 1680 W se generan 1.55 L/s de vapor y el volumen
+// libre (~23 L) se renueva cada 15 s, o sea 28 veces en 7 min. Lo que de verdad
+// cuesta desplazar es el aire atrapado en los poros de la carga, y eso no se
+// calcula: depende del empaque y la humedad.
 //
-// Dos factores juegan en contra aqui: la valvula esta en la TAPA (arriba), no
-// abajo como en un desplazamiento por gravedad bien hecho, y la carga es un
-// lecho de 20 cm. El estandar para estos recipientes son 10 minutos.
+// Ademas la valvula esta en la TAPA, no abajo como en un desplazamiento por
+// gravedad bien hecho, y el estandar para estos recipientes son 10 min.
 //
-// La purga insuficiente no falla de forma visible: deja bolsas de aire donde el
-// vapor no penetra, y la PT100 del termowell no se entera. Validar con
-// indicador biologico en el centro de la carga (§10.17).
+// Se deja fija a proposito: la purga insuficiente no falla de forma visible
+// -deja bolsas de aire que la PT100 del termowell no ve- y solo un indicador
+// biologico en el centro de la carga puede decir si basta (§10.17, §10.18).
+// No es un parametro para tocar a ojo.
+const uint32_t PURGA_MS = 7UL * 60UL * 1000UL;
 const float    MARGEN_EBU_C     = 1.0f;   // cuanto antes de la ebullicion contar
 const float    SUBIDA_CIERRE_C  = 2.0f;   // subida que demuestra valvula cerrada
 const uint32_t AVISO_CIERRE_MS  = 5UL * 60UL * 1000UL;  // reaviso si no sube
@@ -480,6 +478,15 @@ const float    T_DESPRESURIZADO_C = 90.0f;
 const uint32_t REAVISO_ABRIR_MS   = 60UL * 1000UL;
 
 volatile uint32_t g_inicioFase   = 0;
+
+// Cronometro del ciclo completo. Se congela al completarse la esterilizacion:
+// el tiempo que interesa registrar es el del proceso, no el del enfriamiento.
+volatile uint32_t g_finCiclo     = 0;   // 0 = en curso
+
+uint32_t segundosCiclo() {
+  uint32_t fin = g_finCiclo ? g_finCiclo : millis();
+  return (fin - g_inicioEnsayo) / 1000;
+}
 volatile float    g_F0           = 0.0f;
 volatile float    g_tAlCerrar    = NAN;   // T cuando se pidio cerrar la valvula
 volatile uint32_t g_ultimoAviso  = 0;
@@ -500,6 +507,7 @@ const char *nombreFase(uint8_t f) {
 void cambiarFase(uint8_t nueva) {
   g_fase = nueva;
   g_inicioFase = millis();
+  if (nueva == F_TERMINADO) g_finCiclo = millis();   // detiene el cronometro
   Serial.printf("# FASE -> %s  (T=%.2f C)\n", nombreFase(nueva), g_temperatura);
 }
 
@@ -553,7 +561,7 @@ int avanzarCiclo(float t) {
         return 0;
       }
       if (t < ebu - MARGEN_EBU_C - 1.0f) { cambiarFase(F_CALENTANDO); return 100; }
-      if (enFase >= (uint32_t)(g_par.minutosPurga * 60000.0f)) {
+      if (enFase >= PURGA_MS) {
         g_tAlCerrar = t;
         g_avisosCierre = 0;
         cambiarFase(F_CERRAR_VALVULA);
@@ -1123,7 +1131,6 @@ const ItemMenu MENU_OPERADOR[] = {
 // Quien no sabe que es Kp no tiene por que tropezarse con ello.
 const ItemMenu MENU_SERVICIO[] = {
   { "Calibracion",    "Ajustar contra el patron",  IT_ACCION, NULL, 0,0,0,0, NULL, AC_CALIBRAR },
-  { "Tiempo purga",   "Barrido de aire, Fase 1",   IT_VALOR, &g_par.minutosPurga,  1,  20, 1.0f, 0, "min", 0 },
   { "Tiempo maximo",  "Corta el ciclo por tiempo", IT_VALOR, &g_par.minutosEnsayo, 5, 240, 5.0f, 0, "min", 0 },
   { "Control Kp",     "Ganancia proporcional",     IT_VALOR, &g_par.kp, 0, 100, 0.1f,   2, NULL, 0 },
   { "Control Ki",     "Ganancia integral",         IT_VALOR, &g_par.ki, 0,  10, 0.001f, 4, NULL, 0 },
@@ -1163,7 +1170,7 @@ const PuntoChecklist CHECKLIST[] = {
   { "Nivel de agua OK y",   "resistencia sumergida"  },
   { "Valvula de seguridad", "libre y sin obstruir"   },
   { "Tapa asegurada y",     "correctamente sellada"  },
-  { "Carga en capas de",    "5 cm o menos"           },
+  { "Sustrato HUMEDO y",    "carga como la validada" },
   { "Voy a permanecer",     "presente todo el ciclo" },
 };
 const uint8_t N_CHECKLIST = sizeof(CHECKLIST)/sizeof(PuntoChecklist);
@@ -1475,16 +1482,21 @@ void dibujarCalibracion() {
 }
 
 // Pantalla del ciclo. Cada fase muestra lo que el operador necesita en ESE
-// momento, no un panel generico: durante la purga importa el reloj y el vapor,
-// al cerrar importa la orden, y en la meseta importa el F0.
+// momento, no un panel generico.
+//
+// La cabecera lleva el cronometro del ciclo completo, que se congela al
+// terminar la esterilizacion: lo que interesa registrar es cuanto duro el
+// proceso, no cuanto lleva enfriando. La temperatura no va en la cabecera
+// porque cada fase ya la muestra donde le corresponde.
 void dibujarCiclo() {
   char buf[32];
   uint32_t enFase = (millis() - g_inicioFase) / 1000;
+  uint32_t total  = segundosCiclo();
 
-  // --- Cabecera comun ---
+  // --- Cabecera: fase + tiempo total del ciclo ---
   pantalla.setFont(u8g2_font_6x10_tf);
   pantalla.drawStr(0, 8, nombreFase(g_fase));
-  snprintf(buf, sizeof(buf), "%.1fC", g_temperatura);
+  snprintf(buf, sizeof(buf), "%lu:%02lu", total / 60, total % 60);
   pantalla.drawStr(128 - pantalla.getStrWidth(buf), 8, buf);
   pantalla.drawHLine(0, 11, 128);
 
@@ -1495,52 +1507,58 @@ void dibujarCiclo() {
       snprintf(buf, sizeof(buf), "%.1f", g_temperatura);
       pantalla.drawStr(2, 36, buf);
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "hierve a %.1f C", puntoEbullicion());
+      snprintf(buf, sizeof(buf), "hierve a %.1f", puntoEbullicion());
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 24, buf);
-      snprintf(buf, sizeof(buf), "%lu:%02lu", enFase / 60, enFase % 60);
-      pantalla.drawStr(128 - pantalla.getStrWidth(buf), 34, buf);
+      pantalla.drawStr(128 - pantalla.getStrWidth("100%"), 34, "100%");
       pantalla.drawHLine(0, 42, 128);
       pantalla.setFont(u8g2_font_6x10_tf);
       pantalla.drawStr(0, 53, "VALVULA ABIERTA");
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 62, "Espere a la ebullicion");
+      pantalla.drawStr(0, 63, "Espere a la ebullicion");
       break;
     }
 
     case F_PURGA: {
-      uint32_t total = (uint32_t)(g_par.minutosPurga * 60.0f);
-      uint32_t resta = (enFase < total) ? total - enFase : 0;
+      uint32_t tot = PURGA_MS / 1000;
+      uint32_t resta = (enFase < tot) ? tot - enFase : 0;
+
+      // Cuenta atras grande a la izquierda, temperatura a la derecha
       pantalla.setFont(u8g2_font_logisoso20_tn);
       snprintf(buf, sizeof(buf), "%lu:%02lu", resta / 60, resta % 60);
-      pantalla.drawStr(64 - pantalla.getStrWidth(buf) / 2, 36, buf);
+      pantalla.drawStr(2, 33, buf);
+      pantalla.setFont(u8g2_font_6x10_tf);
+      snprintf(buf, sizeof(buf), "%.1fC", g_temperatura);
+      pantalla.drawStr(128 - pantalla.getStrWidth(buf), 31, buf);
 
-      pantalla.drawFrame(0, 41, 128, 8);
-      int w = (int)((enFase * 126) / total);
+      pantalla.drawFrame(0, 37, 128, 8);
+      int w = (int)((enFase * 126) / tot);
       if (w > 126) w = 126;
-      if (w > 0) pantalla.drawBox(1, 42, w, 6);
+      if (w > 0) pantalla.drawBox(1, 38, w, 6);
 
+      // Dos lineas con 9 px de separacion: con la fuente 5x8 no se solapan
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 58, "Debe salir vapor continuo");
-      pantalla.drawStr(0, 66 - 4, "por la valvula abierta");
+      pantalla.drawStr(0, 54, "Debe salir vapor continuo");
+      pantalla.drawStr(0, 63, "por la valvula abierta");
       break;
     }
 
     case F_CERRAR_VALVULA: {
-      // Orden clara y en negativo/positivo alternado para que llame la atencion
       bool parpadeo = ((millis() / 500) % 2) == 0;
-      if (parpadeo) { pantalla.drawBox(0, 14, 128, 18); pantalla.setDrawColor(0); }
+      if (parpadeo) { pantalla.drawBox(0, 13, 128, 17); pantalla.setDrawColor(0); }
       pantalla.setFont(u8g2_font_7x13_tf);
-      pantalla.drawStr(6, 27, "CIERRE LA VALVULA");
+      pantalla.drawStr(6, 26, "CIERRE LA VALVULA");
       pantalla.setDrawColor(1);
 
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 42, "Purga completa.");
-      pantalla.drawStr(0, 51, "Cierre la valvula de purga.");
+      snprintf(buf, sizeof(buf), "%.1f C   purga completa", g_temperatura);
+      pantalla.drawStr(0, 41, buf);
       if (g_avisosCierre > 0) {
-        snprintf(buf, sizeof(buf), "Sin subir T. Aviso %u", g_avisosCierre);
-        pantalla.drawStr(0, 62, buf);
+        snprintf(buf, sizeof(buf), "NO sube la T. Aviso %u", g_avisosCierre);
+        pantalla.drawStr(0, 52, buf);
+        pantalla.drawStr(0, 62, "Sigue abierta la valvula?");
       } else {
-        pantalla.drawStr(0, 62, "Se detecta sola al subir T");
+        pantalla.drawStr(0, 52, "Cierre la valvula ahora.");
+        pantalla.drawStr(0, 62, "Se detecta al subir la T");
       }
       break;
     }
@@ -1550,14 +1568,14 @@ void dibujarCiclo() {
       snprintf(buf, sizeof(buf), "%.1f", g_temperatura);
       pantalla.drawStr(2, 36, buf);
       pantalla.setFont(u8g2_font_5x8_tf);
-      snprintf(buf, sizeof(buf), "meta %.1f C", g_par.setpoint);
+      snprintf(buf, sizeof(buf), "meta %.1f", g_par.setpoint);
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 24, buf);
       pantalla.drawStr(128 - pantalla.getStrWidth("100%"), 34, "100%");
       pantalla.drawHLine(0, 42, 128);
       pantalla.setFont(u8g2_font_6x10_tf);
       pantalla.drawStr(0, 53, "Valvula cerrada OK");
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 62, "Subiendo a la consigna");
+      pantalla.drawStr(0, 63, "Subiendo a la consigna");
       break;
     }
 
@@ -1572,20 +1590,20 @@ void dibujarCiclo() {
       snprintf(buf, sizeof(buf), "%d%%", g_dutyComandado);
       pantalla.drawStr(128 - pantalla.getStrWidth(buf), 32, buf);
 
-      // F0: es el dato que decide cuando termina el ciclo, asi que va grande
+      // F0 es el dato que decide cuando termina: va destacado
       pantalla.setFont(u8g2_font_6x10_tf);
       snprintf(buf, sizeof(buf), "F0 %.1f / %.0f", g_F0, g_par.f0Objetivo);
-      pantalla.drawStr(0, 47, buf);
+      pantalla.drawStr(0, 46, buf);
 
-      pantalla.drawFrame(0, 51, 128, 9);
+      pantalla.drawFrame(0, 50, 128, 9);
       int w = (int)((g_F0 * 126.0f) / g_par.f0Objetivo);
       if (w > 126) w = 126;
-      if (w > 0) pantalla.drawBox(1, 52, w, 7);
+      if (w > 0) pantalla.drawBox(1, 51, w, 7);
 
       pantalla.setFont(u8g2_font_5x8_tf);
       float tasa = powf(10.0f, (g_temperatura - 121.1f) / 10.0f);
       snprintf(buf, sizeof(buf), "%.2f min/min", tasa);
-      pantalla.drawStr(0, 68 - 6, buf);
+      pantalla.drawStr(0, 63, buf);
       break;
     }
 
@@ -1593,18 +1611,16 @@ void dibujarCiclo() {
       pantalla.setFont(u8g2_font_7x13_tf);
       pantalla.drawStr(2, 25, "CICLO COMPLETO");
       pantalla.setFont(u8g2_font_6x10_tf);
-      snprintf(buf, sizeof(buf), "F0 %.1f min alcanzado", g_F0);
-      pantalla.drawStr(0, 36, buf);
-      pantalla.drawHLine(0, 40, 128);
+      snprintf(buf, sizeof(buf), "F0 %.1f  en %lu:%02lu", g_F0, total / 60, total % 60);
+      pantalla.drawStr(0, 37, buf);
+      pantalla.drawHLine(0, 41, 128);
 
-      // Enfriando: la cuenta atras hacia el umbral de despresurizacion
       pantalla.setFont(u8g2_font_5x8_tf);
-      pantalla.drawStr(0, 49, "NO ABRIR - aun hay presion");
+      pantalla.drawStr(0, 50, "NO ABRIR - aun hay presion");
       snprintf(buf, sizeof(buf), "%.1f C  ->  aviso a %.0f C",
                g_temperatura, T_DESPRESURIZADO_C);
-      pantalla.drawStr(0, 58, buf);
+      pantalla.drawStr(0, 59, buf);
 
-      // Barra de progreso del enfriamiento, desde el setpoint hasta el umbral
       int w = (int)(126.0f * (g_par.setpoint - g_temperatura) /
                     (g_par.setpoint - T_DESPRESURIZADO_C));
       if (w < 0) w = 0;
@@ -1622,7 +1638,7 @@ void dibujarCiclo() {
       pantalla.setDrawColor(1);
 
       pantalla.setFont(u8g2_font_6x10_tf);
-      snprintf(buf, sizeof(buf), "%.1f C   F0 %.1f min", g_temperatura, g_F0);
+      snprintf(buf, sizeof(buf), "%.1f C   F0 %.1f", g_temperatura, g_F0);
       pantalla.drawStr(0, 38, buf);
       pantalla.drawHLine(0, 42, 128);
 
@@ -1630,7 +1646,7 @@ void dibujarCiclo() {
       // manometro es la medida directa y sigue siendo la autoridad.
       pantalla.setFont(u8g2_font_5x8_tf);
       pantalla.drawStr(0, 52, "VERIFIQUE EL MANOMETRO");
-      pantalla.drawStr(0, 61, "EN CERO ANTES DE ABRIR");
+      pantalla.drawStr(0, 62, "EN CERO ANTES DE ABRIR");
       break;
     }
   }
@@ -1791,6 +1807,7 @@ void lanzarCiclo() {
   g_tInicioEnsayo = g_temperatura;
   g_inicioEnsayo  = millis();
   g_F0            = 0.0f;
+  g_finCiclo      = 0;
   g_tAlCerrar     = NAN;
   g_ultimoAviso   = 0;
   g_avisosCierre  = 0;
@@ -2013,8 +2030,10 @@ void mostrarEstado() {
                 g_par.kp, g_par.ki, g_errorPID, g_salidaPID);
   Serial.printf("# Ebullicion  : %.2f C a %.0f m\n", puntoEbullicion(), ALTITUD_M);
   if (g_estado == EST_CICLO)
-    Serial.printf("# Ciclo       : F0 %.2f / %.0f min   fase %s\n",
-                  g_F0, g_par.f0Objetivo, nombreFase(g_fase));
+    Serial.printf("# Ciclo       : F0 %.2f / %.0f min  fase %s  total %lu:%02lu\n",
+                  g_F0, g_par.f0Objetivo, nombreFase(g_fase),
+                  (unsigned long)(segundosCiclo() / 60),
+                  (unsigned long)(segundosCiclo() % 60));
   Serial.printf("# Relevo PID  : %.1f C   precarga %.1f %%\n",
                 g_par.setpoint - ENTREGA_PID_C,
                 DUTY_POR_GRADO * (g_par.setpoint - T_AMBIENTE_C));
@@ -2122,7 +2141,6 @@ bool fijarParametro(const String &c) {
     { "kd",   &g_par.kd,             0.0f,  100.0f, 3 },
     { "sp",   &g_par.setpoint,      20.0f,  135.0f, 1 },
     { "min",  &g_par.minutosEnsayo,  5.0f,  240.0f, 0 },
-    { "purga",&g_par.minutosPurga,   1.0f,   20.0f, 0 },
     { "duty", &g_par.dutyEnsayo,     5.0f,  100.0f, 0 },
     { "f0",   &g_par.f0Objetivo,     1.0f,  120.0f, 0 },
   };

@@ -1502,26 +1502,49 @@ Dos factores juegan en contra en este equipo:
 
 Coste: 7 min de un ciclo de ~90, un 8 %.
 
-### 10.18.1 Decisión: medirlo, no adivinarlo
+### 10.18.1 Decisión: se deja FIJA en 7 minutos
 
-`minutosPurga` pasa a ser **parámetro ajustable** (menú Servicio → Tiempo purga,
-1–20 min, o comando `purga <min>`), guardado en NVS. Por defecto 7.
+Se evaluó hacerla ajustable y **se descartó a propósito**. No es un parámetro
+para tocar a ojo: la purga insuficiente no da ninguna señal, y quien la bajara
+"porque parece mucho" no tendría forma de saber que se equivocó.
 
 **El test con indicador biológico (§10.17) también valida la purga:** si un vial
-en el centro de la carga da negativo, la purga fue suficiente para esa carga
-concreta.
+en el centro de la carga da negativo, la purga fue suficiente para esa carga.
+Solo con ese dato tendría sentido revisar el valor.
 
-Orden de experimentación recomendado:
-
-1. Primer ciclo de validación con **purga = 7 min** y F₀ = 20
-2. Si el vial da **negativo**, la purga es suficiente; se puede explorar bajarla
-3. Si da **positivo**, la purga es lo primero que hay que alargar — antes que
-   subir el F₀, porque una bolsa de aire no se compensa con más tiempo
-
-Ese último punto importa: **más F₀ no arregla una bolsa de aire.** Si el vapor
-no llega, la temperatura local no sube por mucho que se prolongue el ciclo.
+> ⚠️ **Si el vial da positivo, alargar la purga ANTES que subir el F₀.**
+> Más F₀ no arregla una bolsa de aire: si el vapor no llega a un punto, la
+> temperatura local no sube por mucho que se prolongue el ciclo. Son dos
+> problemas distintos con soluciones distintas.
 
 ---
+
+## 10.19 Ajustes de interfaz tras uso real (v1.3.1)
+
+Correcciones pedidas por el operador después de varios ciclos:
+
+**Cronómetro del proceso completo.** Antes cada pantalla mostraba solo el tiempo
+de su fase, así que no había forma de saber cuánto llevaba el ciclo. Ahora la
+cabecera lleva el **tiempo total**, y **se congela al completarse la
+esterilización** — lo que interesa registrar es la duración del proceso, no la
+del enfriamiento. La pantalla de fin muestra `F0 20.0 en 56:12`.
+
+La temperatura sale de la cabecera para hacerle sitio: cada fase ya la muestra
+donde corresponde, y en la cabecera era redundante.
+
+**Texto solapado en la pantalla de purga.** Las dos líneas de instrucción
+estaban a `y=58` y `y=62` — 4 px de separación con una fuente de 8 px de alto,
+así que se montaban. Corregido a `y=54` y `y=63`. Revisadas todas las demás
+pantallas por el mismo motivo.
+
+**Checklist: el punto de los 5 cm.** Ya no refleja la práctica real del
+laboratorio (§10.16), que trabaja con capas de 20 cm. Sustituido por
+**"Sustrato HÚMEDO y carga como la validada"**, que verifica dos cosas que sí
+importan: el vapor no penetra material seco, y la carga debe corresponder con
+aquella para la que se fijó el F₀ objetivo.
+
+---
+
 
 ## 11. OBSERVACIONES ABIERTAS
 
