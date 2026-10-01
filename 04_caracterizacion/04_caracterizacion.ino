@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.6.0";
+const char *VERSION_FW = "1.6.1";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -204,6 +204,7 @@ enum Estado : int { EST_IDLE = 0, EST_ENSAYO = 1, EST_FALLA = 2, EST_PID = 3, ES
 volatile int g_estado = EST_IDLE;
 char g_motivoFalla[48] = "";
 bool g_fallaCritica    = false;   // critica = no se borra desde el encoder
+volatile bool g_pedirMelodiaFin = false;  // F0 cumplido: lo suena loop()
 char g_avisoSensor[32] = "";   // problema actual del sensor, sin latchar
 
 volatile int   g_dutyComandado = 0;
@@ -513,7 +514,13 @@ const uint32_t AVISO_CIERRE_MS  = 5UL * 60UL * 1000UL;  // reaviso si no sube
 // es una medida directa. Si la sonda fallara leyendo bajo, el firmware diria
 // "seguro" con presion dentro. El mensaje pide verificar el manometro.
 const float    T_DESPRESURIZADO_C = 90.0f;
+// Reaviso de "ya se puede abrir" en dos ritmos. Los primeros minutos cada
+// minuto, porque es cuando el operador probablemente anda cerca. Despues
+// mas espaciado: una alarma que suena cada minuto toda la noche termina
+// con el buzzer desconectado, y entonces no queda alarma para nada.
 const uint32_t REAVISO_ABRIR_MS   = 60UL * 1000UL;
+const uint32_t REAVISO_LENTO_MS   = 5UL * 60UL * 1000UL;
+const uint32_t REAVISO_INSISTE_MS = 10UL * 60UL * 1000UL;  // tramo rapido
 
 volatile uint32_t g_inicioFase   = 0;
 
@@ -643,19 +650,31 @@ int avanzarCiclo(float t) {
       }
       return 0;
 
-    case F_LISTO_ABRIR:
-      // Reaviso periodico: el operador puede no estar delante.
-      if (enFase - g_ultimoAviso >= REAVISO_ABRIR_MS) {
+    case F_LISTO_ABRIR: {
+      // Reaviso periodico: el operador puede no estar delante. No se calla
+      // nunca -- la carga no debe quedar olvidada -- pero pasa a un ritmo
+      // mas lento una vez que es evidente que no hay nadie cerca.
+      uint32_t cada = (enFase < REAVISO_INSISTE_MS) ? REAVISO_ABRIR_MS
+                                                    : REAVISO_LENTO_MS;
+      if (enFase - g_ultimoAviso >= cada) {
         g_ultimoAviso = enFase;
         avisoAccion();
       }
       return 0;
+    }
 
     case F_MESETA: {
       // Acumulacion de letalidad (§5 Fase 3). z = 10 C, referencia 121.1 C.
       // Las caidas breves se integran solas: no hay conteo que reiniciar.
       g_F0 += powf(10.0f, (t - 121.1f) / 10.0f) / 60.0f;   // dt = 1 s
-      if (g_F0 >= g_par.f0Objetivo) { cambiarFase(F_TERMINADO); return 0; }
+      if (g_F0 >= g_par.f0Objetivo) {
+        cambiarFase(F_TERMINADO);
+        // La melodia la toca loop(): dura 1.3 s y esta tarea no puede
+        // quedarse bloqueada tanto tiempo sin leer la temperatura.
+        g_pedirMelodiaFin = true;
+        Serial.printf("# ESTERILIZACION COMPLETA. F0 = %.2f min\n", g_F0);
+        return 0;
+      }
       return (int)lroundf(calcularPI(g_par.setpoint, t, 1.0f));
     }
 
@@ -1967,6 +1986,7 @@ void aplicarPulsacion(int tipo) {
             (g_fase == F_TERMINADO || g_fase == F_LISTO_ABRIR)) {
           g_estado = EST_IDLE;
           g_vista  = V_PRINCIPAL;
+          pitidoOk();
           Serial.println(F("# Aviso de despresurizacion cerrado por el operador."));
           break;
         }
@@ -2367,10 +2387,12 @@ void loop() {
     melodiaFin();
     g_vista = V_RESULTADOS;
   }
-  if (estadoPrevio == EST_CICLO && g_estado == EST_IDLE && g_fase == F_TERMINADO) {
-    melodiaFinCiclo();
-    g_vista = V_CICLO;                 // se queda mostrando el aviso de presion
-  }
+  // La melodia suena cuando se cumple el F0, que es el hito real del
+  // proceso. Antes estaba atada a que el operador descartara el aviso en
+  // F_TERMINADO: sonaba al cerrar el "NO ABRIR" y se quedaba muda al
+  // cerrar el "DESPRESURIZADO", justo al reves de lo que corresponde. Y
+  // como reponia g_vista = V_CICLO, la pulsacion larga no cerraba nada.
+  if (g_pedirMelodiaFin) { g_pedirMelodiaFin = false; melodiaFinCiclo(); }
   estadoPrevio = g_estado;
 
   delay(20);

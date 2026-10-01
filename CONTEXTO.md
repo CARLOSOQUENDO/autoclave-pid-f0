@@ -1716,6 +1716,105 @@ No debería alcanzarse nunca —la UI no deja llegar al menú en FALLA— pero e
 
 ---
 
+## 10.22 Auditoría de los avisos acústicos (v1.6.1)
+
+El Sr. Carlos preguntó cómo estaban los sonidos. El inventario estaba bien
+pensado, pero el final del ciclo tenía tres defectos con una misma raíz.
+
+### 10.22.1 Los seis sonidos
+
+| Función | Tono | Dura | Significado |
+|---|---|---|---|
+| `pitidoClic()` | 2000 Hz | 15 ms | Giro y clic del encoder |
+| `pitidoOk()` | 1500 Hz | 60 ms | Acción aceptada, transición normal de fase |
+| `pitidoAviso()` | 1000 Hz | 150 ms | Arranca ciclo o ensayo |
+| `avisoAccion()` | 2093↔1568 Hz ×3 | ~1.2 s | **Pide acción al operador** |
+| `pitidoFalla()` | 400 Hz ×5 | ~1.4 s | Falla |
+| `melodiaFinCiclo()` | do-mi-sol-do-sol-do | ~1.3 s | F0 cumplido |
+
+El criterio es que la frecuencia baja con la gravedad: 2000 Hz para la
+realimentación trivial del encoder, 400 Hz para la falla. Y que lo que exige
+acción del operador (`avisoAccion`) no se parezca ni a una confirmación ni a
+una falla.
+
+### 10.22.2 Los tres defectos del final del ciclo
+
+**1. Cumplir el F0 era mudo.** La línea decía:
+
+```c
+if (g_F0 >= g_par.f0Objetivo) { cambiarFase(F_TERMINADO); return 0; }
+```
+
+El hito más importante del proceso —la esterilización terminó— no sonaba. El
+operador se enteraba solo si estaba mirando la pantalla.
+
+**2. La melodía de fin sonaba al revés.** Su condición en `loop()` era
+`estadoPrevio == EST_CICLO && g_estado == EST_IDLE && g_fase == F_TERMINADO`,
+y nada lleva a `EST_IDLE` automáticamente: solo la pulsación larga. Entonces
+la melodía sonaba cuando el operador descartaba el aviso **`NO ABRIR - AÚN HAY
+PRESIÓN`**, y se quedaba muda cuando descartaba el de **`DESPRESURIZADO`** —
+porque ahí `g_fase` ya era `F_LISTO_ABRIR` y la condición fallaba. Celebraba
+el momento peligroso y callaba el seguro.
+
+**3. Y la pulsación larga no funcionaba en F_TERMINADO.** Mismo bloque: ponía
+`g_vista = V_CICLO` justo después de que la pulsación había puesto
+`V_PRINCIPAL`. El operador dejaba pulsado y no pasaba nada.
+
+**Cómo quedó.** La melodía se desató del descarte del aviso y se ató al hito
+real. `avanzarCiclo()` solo levanta una bandera, porque corre en `tareaSensor`
+y no puede bloquearse 1.3 s sin leer la temperatura:
+
+```c
+if (g_F0 >= g_par.f0Objetivo) {
+  cambiarFase(F_TERMINADO);
+  g_pedirMelodiaFin = true;      // la toca loop()
+  ...
+}
+```
+
+Y cerrar el aviso ahora confirma con `pitidoOk()`, que es lo que hace el resto
+de la interfaz.
+
+### 10.22.3 Reaviso de LISTO ABRIR: dos ritmos
+
+El reaviso era cada 60 s indefinidamente. Si un ciclo termina a las 6 pm y
+nadie vuelve hasta la mañana, son unas 700 alarmas. El resultado práctico de
+eso es que alguien desconecta el buzzer, y entonces no queda alarma para nada.
+
+Decisión del Sr. Carlos: **espaciarlo, no cortarlo.** Cada minuto los primeros
+10 minutos, que es cuando el operador probablemente anda cerca; después cada
+5 minutos, indefinidamente. La carga nunca queda olvidada, pero la alarma no
+se vuelve ruido de fondo.
+
+No se eligió cortarla: una carga estéril olvidada con la tapa cerrada no es
+peligrosa, pero tampoco hay razón para dejar de avisar.
+
+### 10.22.4 Restricción que hay que respetar
+
+`avisoAccion()` bloquea ~1.2 s con `delay()`, y se llama desde
+`avanzarCiclo()`, que corre en `tareaSensor` (período 1 s, que ya se bloquea
+375 ms en la mediana de 5). Cuando dispara un aviso, ese ciclo de la tarea se
+estira a ~1.5 s.
+
+Hoy eso es inocuo por dos razones, y las dos hay que mantener:
+
+- **Ningún aviso dispara en `F_MESETA`**, que es la única fase donde corre el
+  PI con su `dt = 1.0f` fijo. Si se agregara un `avisoAccion()` a la meseta,
+  el integrador contaría mal el tiempo. **No agregar avisos a la meseta.**
+- **Solo `tareaSalida` está suscrita al watchdog** (8 s), y esa nunca se
+  bloquea. Los bloqueos de `tareaSensor` no lo disparan.
+
+La melodía de fin ya se movió a `loop()` por este motivo.
+
+### 10.22.5 Detalle menor sin resolver
+
+`tone()` usa un solo temporizador. Un `pitidoClic()` desde `tareaUI` puede
+truncar un `avisoAccion()` que esté sonando en `tareaSensor`. En la práctica
+significa que tocar el encoder calla la alarma a mitad de tono. No se corrigió
+porque el aviso se repite y el efecto es benigno, pero queda anotado.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa
