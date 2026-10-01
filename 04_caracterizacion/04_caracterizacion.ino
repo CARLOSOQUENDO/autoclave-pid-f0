@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.6.1";
+const char *VERSION_FW = "1.6.2";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -2254,7 +2254,7 @@ bool fijarParametro(const String &c) {
 
 void ayuda() {
   Serial.println(F("# Comandos: estado | diag | cal <C> | calibrar | manual | escalon |"));
-  Serial.println(F("#           sonido | regs | bias on|off | armar |"));
+  Serial.println(F("#           sonido | probarfalla | regs | bias on|off | armar |"));
   Serial.println(F("#           desarmar | parar | resultados | volcar | borrar | reset | help"));
   Serial.println(F("# Parametros: kp | ki | kd | sp | min | duty | f0  <valor>"));
   Serial.println(F("# El ensayo se lanza desde el MENU con el encoder."));
@@ -2292,6 +2292,23 @@ void procesarComando(String c) {
                                        g_vista = V_CONFIRMAR;
                                        Serial.println(F("# Ensayo de escalon: confirma en el equipo.")); } }
   else if (c == "sonido")     { pitidoOk(); delay(300); pitidoAviso(); delay(300); avisoAccion(); }
+  // Un enclavamiento que no se puede probar es un enclavamiento que no se
+  // sabe si funciona. El limite absoluto no se puede falsear con "cal"
+  // -- el offset esta topado en +/-3 C y se vigila fmaxf(t, cruda) -- asi
+  // que esta es la unica forma de verificar el latch sin calentar la olla
+  // de verdad. Queda en consola, fuera del alcance del operador, y el
+  // motivo dice PRUEBA para que no se confunda con un evento real.
+  else if (c == "probarfalla") {
+    if (g_estado != EST_IDLE) {
+      Serial.println(F("# Solo en reposo. Pare el ciclo primero."));
+      return;
+    }
+    Serial.println(F("# Lanzando falla critica de PRUEBA. Deberia:"));
+    Serial.println(F("#   1. mostrar ** FALLA GRAVE ** en la pantalla"));
+    Serial.println(F("#   2. NO borrarse con pulsacion larga"));
+    Serial.println(F("#   3. seguir ahi despues de cortar la alimentacion"));
+    entrarEnFallaCritica("PRUEBA de enclavamiento (consola)");
+  }
   else if (c.startsWith("cal ")) {
     float v = c.substring(4).toFloat();
     if (v > OFFSET_MAX_C || v < -OFFSET_MAX_C) {

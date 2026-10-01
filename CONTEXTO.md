@@ -1815,6 +1815,92 @@ porque el aviso se repite y el efecto es benigno, pero queda anotado.
 
 ---
 
+## 10.23 Enclavamiento de falla crítica: verificado (v1.6.2, 2026-10-01)
+
+### 10.23.1 Por qué hizo falta un comando de consola
+
+El límite absoluto **no se puede falsear desde la calibración**, y eso es una
+protección funcionando, no un estorbo:
+
+```c
+const float OFFSET_MAX_C = 3.0;
+...
+// Se vigilan las dos: asi un offset mal ajustado nunca puede subir el
+// punto de corte efectivo, solo bajarlo.
+float tVigilada = fmaxf(t, g_tCruda);
+if (tVigilada > T_LIMITE_ABSOLUTO) sobreTempSegs++;  else sobreTempSegs = 0;
+```
+
+El offset está topado en ±3 °C y el corte compara el máximo entre la lectura
+corregida y la cruda. No hay forma de empujar la temperatura aparente a 128 °C
+con `cal`. La otra entrada crítica —sensor ciego con la salida energizada—
+exigiría desconectar la sonda **con la resistencia energizada**, que es
+justamente lo que no se va a hacer para probar.
+
+Quedaba calentar la olla de verdad hasta 128 °C, que es absurdo como prueba
+rutinaria. Así que se agregó `probarfalla`:
+
+```c
+else if (c == "probarfalla") {
+  if (g_estado != EST_IDLE) { ... return; }
+  entrarEnFallaCritica("PRUEBA de enclavamiento (consola)");
+}
+```
+
+Es permanente, no andamiaje de prueba. **Un enclavamiento que no se puede
+probar es un enclavamiento que no se sabe si funciona**, y este hay que poder
+reverificarlo después de cada cambio de firmware. Está en consola, fuera del
+alcance del operador (§10.20.1), y el motivo dice `PRUEBA` para que no se
+confunda con un evento real en el CSV ni en el log.
+
+### 10.23.2 Resultado de la prueba
+
+Ensayo del 2026-10-01 sobre el hardware real, con el equipo en reposo a
+24.1 °C:
+
+| Verificación | Resultado |
+|---|---|
+| Enclava, corta la salida y la deja desarmada | OK |
+| Pantalla muestra `** FALLA GRAVE **` y `REQUIERE REVISION TECNICA` | OK |
+| Pulsación larga suena pero **no** la borra | OK |
+| Sobrevive al corte de alimentación y arranca enclavada | OK |
+| `reset` por consola la borra | OK |
+| Después del `reset` el siguiente arranque es limpio | OK |
+
+Traza del arranque con el latch puesto:
+
+```
+# *** ARRANCA EN FALLA CRITICA SIN RECONOCER ***
+# *** Motivo guardado: PRUEBA de enclavamiento (consola)
+# *** Revise el SSR y el sensor antes de dar reset. ***
+```
+
+Y del reconocimiento:
+
+```
+# *** FALLA CRITICA RECONOCIDA. Salida sigue DESARMADA. ***
+```
+
+La calibración quedó intacta (offset −0.60 °C contra el Hanna Checktemp), que
+era el riesgo de haber intentado la prueba por la vía del `cal`.
+
+### 10.23.3 Cómo reverificarlo
+
+Con el equipo en reposo y el USB conectado:
+
+```
+probarfalla          -> debe aparecer ** FALLA GRAVE ** en la pantalla
+                        (dejar pulsado el encoder: suena y NO se borra)
+                        (cortar la alimentacion y volver: sigue enclavada)
+reset                -> la borra
+                        (reiniciar: debe arrancar limpio)
+```
+
+Conviene repetirlo después de cualquier cambio que toque `latcharFalla()`,
+`restaurarFallaCritica()`, `aplicarPulsacion()` o el comando `reset`.
+
+---
+
 ## 11. OBSERVACIONES ABIERTAS
 
 ### 11.1 Altitud del sitio — RESUELTO, con implicación operativa
