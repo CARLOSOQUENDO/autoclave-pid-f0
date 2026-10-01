@@ -58,7 +58,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.6.2";
+const char *VERSION_FW = "1.6.3";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -2291,7 +2291,16 @@ void procesarComando(String c) {
                                 else { g_arrancandoPID = false; g_siNo = 0;
                                        g_vista = V_CONFIRMAR;
                                        Serial.println(F("# Ensayo de escalon: confirma en el equipo.")); } }
-  else if (c == "sonido")     { pitidoOk(); delay(300); pitidoAviso(); delay(300); avisoAccion(); }
+  // Recorre los seis avisos en orden de gravedad. Incluye la melodia de
+  // fin para poder oirla sin tener que correr un ciclo entero.
+  else if (c == "sonido") {
+    Serial.println(F("# clic"));        pitidoClic();      delay(400);
+    Serial.println(F("# ok"));          pitidoOk();        delay(400);
+    Serial.println(F("# aviso"));       pitidoAviso();     delay(400);
+    Serial.println(F("# pide accion")); avisoAccion();     delay(400);
+    Serial.println(F("# fin de ciclo")); melodiaFinCiclo(); delay(400);
+    Serial.println(F("# falla"));       pitidoFalla();
+  }
   // Un enclavamiento que no se puede probar es un enclavamiento que no se
   // sabe si funciona. El limite absoluto no se puede falsear con "cal"
   // -- el offset esta topado en +/-3 C y se vigila fmaxf(t, cruda) -- asi
