@@ -42,6 +42,7 @@
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 #include "driver/pulse_cnt.h"
 #include <math.h>
 
@@ -58,7 +59,7 @@ const uint8_t    PIN_BUZZER  = 33;
 // ---------------------------------------------------------------------------
 // CONFIGURACION
 // ---------------------------------------------------------------------------
-const char *VERSION_FW = "1.6.3";
+const char *VERSION_FW = "1.7.0";
 const char *AUTOR_FW   = "BY_Oquendo";
 
 const float   RREF        = 430.0;
@@ -205,6 +206,7 @@ volatile int g_estado = EST_IDLE;
 char g_motivoFalla[48] = "";
 bool g_fallaCritica    = false;   // critica = no se borra desde el encoder
 volatile bool g_pedirMelodiaFin = false;  // F0 cumplido: lo suena loop()
+volatile bool g_colgarSalida    = false;  // solo para probar el watchdog
 char g_avisoSensor[32] = "";   // problema actual del sensor, sin latchar
 
 volatile int   g_dutyComandado = 0;
@@ -347,6 +349,42 @@ void ponerSSR(bool on) { digitalWrite(PIN_SSR, on ? HIGH : LOW); }
 //   calentaria sin nadie vigilando, asi que NO se borra desde el panel y
 //   sobrevive al corte de alimentacion. Solo sale con "reset" por consola,
 //   cuando alguien ya reviso que paso.
+// Motivo del ultimo arranque. Sirve mas alla de la prueba del watchdog: si
+// el equipo se reinicia solo en mitad de un ciclo, esto dice por que. Una
+// caida de tension y un watchdog piden revisiones muy distintas.
+const char *textoReset(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "encendido normal";
+    case ESP_RST_EXT:       return "reset externo";
+    case ESP_RST_SW:        return "reinicio por software";
+    case ESP_RST_PANIC:     return "PANICO (excepcion de codigo)";
+    case ESP_RST_TASK_WDT:  return "WATCHDOG DE TAREA";
+    case ESP_RST_INT_WDT:   return "WATCHDOG DE INTERRUPCION";
+    case ESP_RST_WDT:       return "WATCHDOG (otro)";
+    case ESP_RST_BROWNOUT:  return "CAIDA DE TENSION";
+    case ESP_RST_DEEPSLEEP: return "salida de deep sleep";
+    default:                return "desconocido";
+  }
+}
+
+// Los motivos que significan que algo fallo se anuncian destacados: un
+// reinicio silencioso en mitad de un ciclo es exactamente lo que no se
+// quiere descubrir revisando el CSV tres dias despues.
+void informarReset() {
+  esp_reset_reason_t r = esp_reset_reason();
+  bool anormal = (r == ESP_RST_PANIC || r == ESP_RST_TASK_WDT ||
+                  r == ESP_RST_INT_WDT || r == ESP_RST_WDT ||
+                  r == ESP_RST_BROWNOUT);
+  if (anormal) {
+    Serial.println(F("# -----------------------------------------------"));
+    Serial.printf ("# [!] ARRANQUE TRAS: %s\n", textoReset(r));
+    Serial.println(F("#     El ciclo anterior quedo interrumpido."));
+    Serial.println(F("# -----------------------------------------------"));
+  } else {
+    Serial.printf("# Arranque: %s\n", textoReset(r));
+  }
+}
+
 void latcharFalla(const char *motivo, bool critica) {
   ponerSSR(false);
   g_dutyComandado = 0;
@@ -696,6 +734,14 @@ void tareaSalida(void *pv) {
   bool estadoActual = false;
 
   for (;;) {
+    // Prueba del watchdog: se cuelga esta tarea a proposito para
+    // comprobar que el watchdog la detecta y reinicia la placa. Lo
+    // primero es cortar la salida: una tarea colgada con el SSR
+    // conduciendo son 8 segundos de resistencia sin vigilancia.
+    if (g_colgarSalida) {
+      ponerSSR(false);
+      for (;;) { __asm__ __volatile__("nop"); }   // ya no se refresca
+    }
     esp_task_wdt_reset();
     uint32_t ahora   = millis();
     uint32_t ventana = g_ventanaMs;
@@ -2254,7 +2300,7 @@ bool fijarParametro(const String &c) {
 
 void ayuda() {
   Serial.println(F("# Comandos: estado | diag | cal <C> | calibrar | manual | escalon |"));
-  Serial.println(F("#           sonido | probarfalla | regs | bias on|off | armar |"));
+  Serial.println(F("#           sonido | probarfalla | probarwdt | regs | bias on|off |"));
   Serial.println(F("#           desarmar | parar | resultados | volcar | borrar | reset | help"));
   Serial.println(F("# Parametros: kp | ki | kd | sp | min | duty | f0  <valor>"));
   Serial.println(F("# El ensayo se lanza desde el MENU con el encoder."));
@@ -2318,6 +2364,20 @@ void procesarComando(String c) {
     Serial.println(F("#   3. seguir ahi despues de cortar la alimentacion"));
     entrarEnFallaCritica("PRUEBA de enclavamiento (consola)");
   }
+  // Misma logica que probarfalla: el watchdog es la ultima red si una
+  // tarea se cuelga, y nunca se habia comprobado que dispare de verdad.
+  else if (c == "probarwdt") {
+    if (g_estado != EST_IDLE) {
+      Serial.println(F("# Solo en reposo. Pare el ciclo primero."));
+      return;
+    }
+    Serial.printf("# Colgando tareaSalida a proposito. El watchdog de %lu s\n",
+                  (unsigned long)(WDT_TIMEOUT_MS / 1000));
+    Serial.println(F("# debe reiniciar la placa. La salida se corta antes."));
+    Serial.println(F("# Al arrancar debe decir: ARRANQUE TRAS WATCHDOG DE TAREA"));
+    Serial.flush();
+    g_colgarSalida = true;
+  }
   else if (c.startsWith("cal ")) {
     float v = c.substring(4).toFloat();
     if (v > OFFSET_MAX_C || v < -OFFSET_MAX_C) {
@@ -2373,6 +2433,7 @@ void setup() {
   Serial.println(F("#  Autonomo: no necesita PC para el ensayo."));
   Serial.println(F("# ================================================"));
 
+  informarReset();
   cargarParametros();
   g_ventanaEditable = g_par.ventanaMs;
   restaurarFallaCritica();

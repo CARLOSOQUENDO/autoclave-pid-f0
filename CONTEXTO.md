@@ -531,11 +531,11 @@ UI. La tarea de control nunca debe bloquearse por el refresco de pantalla.
 | 0. Comunicación ESP32 ↔ PC | ✅ Verificado | `test_comunicacion/` |
 | 1. Validación PT100 / MAX31865 | ✅ Cadena OK; calibración diferida (§10.1) | `01_validacion_pt100/` |
 | 2. PWM lento con lámpara | ✅ Verificado con carga AC real | `02_pwm_lento/` |
-| 3. Encoder + OLED | 🔄 Buzzer y pantalla OK; faltan 2 puntos (§10.2) | `03_ui_encoder_oled/` |
+| 3. Encoder + OLED | ✅ Los cuatro puntos cerrados en uso (§10.2) | `03_ui_encoder_oled/` |
 | 4. Caracterización de planta | ✅ Planta abierta y cerrada medidas (§10.12) | `04_caracterizacion/` |
 | 5. PID | ✅ Rampa + relevo + precarga. Sobrepaso +1.06 °C (§10.13) | `04_caracterizacion/` |
 | 6. Máquina de estados + F₀ | ✅ Ciclo completo validado (§10.14) | `04_caracterizacion/` |
-| 7. Capas de seguridad | 🔄 Adelantadas al paso 4 (ver §10.5) | `04_caracterizacion/` |
+| 7. Capas de seguridad | ✅ Las tres verificadas en hardware (§10.23, §10.24) | `04_caracterizacion/` |
 | 8. Gabinete + validación | ⬜ Pendiente | — |
 
 ### Hardware verificado
@@ -575,7 +575,7 @@ alguna vez se desmonta la sonda.
 
 ---
 
-## 10.2 Paso 3 — pendiente de verificación manual
+## 10.2 Paso 3 — cerrado en uso
 
 `03_ui_encoder_oled/` está implementado, compila y arranca sin errores (el PCNT
 inicializa correctamente: `ESP_ERROR_CHECK` habría abortado el arranque). Integra
@@ -589,6 +589,14 @@ las etapas ya validadas de los pasos 1 y 2.
 | 2 | Un click de detente = un elemento de menú | Ajustar `PASOS_POR_DETENTE` (ahora 4); comando `enc` cuenta detentes |
 | 3 | Giro horario baja en el menú y sube el valor | Invertir las acciones de canal del PCNT |
 | 4 | El buzzer suena (opción "Probar buzzer") | Buzzer activo no responde bien a `tone()`, o necesita transistor |
+
+**Cerrados los cuatro (2026-10-01).** No por un ensayo formal, sino por uso
+acumulado: el operador lleva sesiones navegando el menú, confirmando el
+checklist punto por punto y leyendo las pantallas de cada fase, sin que
+aparecieran ni el desplazamiento del SH1106 ni saltos de detente ni giro
+invertido. El punto 4 sí necesitó hardware: el buzzer no responde a `tone()`
+directamente desde el GPIO y se añadió un TIP122 (§10.4). Los seis avisos
+quedaron comprobados de oído con el comando `sonido` (§10.22).
 
 **Implementado en este paso:**
 - Encoder en cuadratura x4 por **PCNT** con filtro antirrebote de hardware (1 µs),
@@ -1898,6 +1906,88 @@ reset                -> la borra
 
 Conviene repetirlo después de cualquier cambio que toque `latcharFalla()`,
 `restaurarFallaCritica()`, `aplicarPulsacion()` o el comando `reset`.
+
+---
+
+## 10.24 Watchdog: verificado, y el motivo de cada arranque queda en el log (v1.7.0, 2026-10-01)
+
+El watchdog estaba configurado desde el paso 0 y nunca se había comprobado que
+disparara. Una protección configurada y no probada es una suposición.
+
+### 10.24.1 El comando
+
+Mismo razonamiento que `probarfalla` (§10.23.1). `probarwdt` cuelga
+`tareaSalida` a propósito:
+
+```c
+if (g_colgarSalida) {
+  ponerSSR(false);
+  for (;;) { __asm__ __volatile__("nop"); }   // ya no se refresca
+}
+```
+
+**Lo primero es cortar la salida.** Una tarea colgada con el SSR conduciendo
+son 8 segundos de resistencia sin vigilancia, y la prueba no tiene por qué
+incluir eso. El comando además exige `EST_IDLE`.
+
+### 10.24.2 Resultado
+
+Ensayo del 2026-10-01, olla fría y vacía:
+
+```
+ 1.3s | # Colgando tareaSalida a proposito. El watchdog de 8 s
+ 9.4s | E task_wdt: Task watchdog got triggered. The following tasks/users
+       |             did not reset the watchdog in time:
+ 9.4s | E task_wdt:  - salida (CPU 1)
+ 9.4s | E task_wdt: Aborting.
+ 9.7s | Rebooting...
+ 9.7s | rst:0xc (SW_CPU_RESET)
+10.4s | # [!] ARRANQUE TRAS: WATCHDOG DE TAREA
+```
+
+**8.1 s entre el cuelgue y el disparo**, contra `WDT_TIMEOUT_MS = 8000`. Y
+nombró exactamente la tarea suscrita: `salida (CPU 1)`. Tras el reinicio el
+equipo quedó en `IDLE`, salida desarmada, sensor OK y registro de fallas
+limpio.
+
+Confirma de paso la decisión de §10.22.4: solo `tareaSalida` está suscrita al
+watchdog, así que los bloqueos de `tareaSensor` —hasta 1.5 s cuando suena un
+aviso— no lo disparan. Si `tareaSensor` estuviera suscrita, cada
+`avisoAccion()` sería un candidato a reinicio espurio.
+
+### 10.24.3 El motivo de cada arranque, en el log
+
+Aprovechando la prueba se agregó `informarReset()`, que sirve bastante más
+allá de ella: **si el equipo se reinicia solo en mitad de un ciclo, el log
+dice por qué.** Una caída de tensión y un watchdog piden revisiones muy
+distintas, y hasta ahora las dos se veían igual: el equipo simplemente
+aparecía arrancado de nuevo.
+
+Los motivos anormales —pánico, watchdog de tarea, watchdog de interrupción,
+caída de tensión— se anuncian destacados y avisan de que el ciclo anterior
+quedó interrumpido:
+
+```
+# -----------------------------------------------
+# [!] ARRANQUE TRAS: WATCHDOG DE TAREA
+#     El ciclo anterior quedo interrumpido.
+# -----------------------------------------------
+```
+
+Los normales van en una línea: `# Arranque: encendido normal`.
+
+Vale la pena mirar esta línea al revisar un CSV que no cuadre. Un
+`CAIDA DE TENSION` en mitad de una meseta explica por sí solo un F₀ que no
+cerró.
+
+### 10.24.4 Las tres capas, ahora todas verificadas
+
+| Capa | Qué protege | Verificación |
+| :--- | :--- | :--- |
+| Termostato físico (§7.1) | Falla total del firmware | Instalado, corta por bimetálico |
+| Límite absoluto 128 °C | SSR conduciendo sin orden | `probarfalla` (§10.23.2) |
+| Watchdog 8 s | Tarea de salida colgada | `probarwdt`, este apartado |
+| Enclavamiento en NVS | Que alguien reinicie para saltarse una falla grave | `probarfalla`, corte de alimentación |
 
 ---
 

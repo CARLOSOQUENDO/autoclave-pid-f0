@@ -148,9 +148,41 @@ son 2.4 psi.
 | Detección de marcha en seco | ver nota | → FALLA |
 | Watchdog | 8 s | sobre la tarea de salida |
 
-El estado de **FALLA es terminal**: solo se sale con reconocimiento manual.
 `digitalWrite(PIN_SSR, LOW)` es la primera instrucción de `setup()`, antes
 incluso de `Serial.begin()`.
+
+### La FALLA tiene dos niveles
+
+Porque las causas no son igual de graves, y tratarlas igual significó durante
+un tiempo que superar los 128 °C se podía borrar con una pulsación larga:
+
+| | Causas | Cómo se sale |
+| :--- | :--- | :--- |
+| **Recuperable** | Marcha en seco, tiempo máximo agotado | Pulsación larga. La causa está afuera del equipo y el operador la corrige |
+| **Crítica** | Límite absoluto superado, sensor ciego con la salida energizada | Solo por consola. Falló el hardware |
+
+La crítica **queda grabada en NVS**: cortar la alimentación no la borra. Si el
+SSR quedó conduciendo sin orden, el ciclo siguiente calentaría sin control, así
+que el equipo se queda detenido hasta que lo revise alguien con consola.
+
+### Las protecciones se pueden probar
+
+Una protección configurada y no probada es una suposición. Dos comandos de
+consola, fuera del alcance del operador, permiten reverificarlas después de
+cada cambio de firmware sin calentar la olla:
+
+```
+probarfalla   enclava una falla crítica de prueba
+              -> pantalla ** FALLA GRAVE **, no cede a la pulsación larga,
+                 sobrevive al corte de alimentación, se borra con 'reset'
+
+probarwdt     cuelga la tarea de salida a propósito (corta el SSR antes)
+              -> el watchdog debe reiniciar la placa en 8 s y el arranque
+                 debe reportar: ARRANQUE TRAS WATCHDOG DE TAREA
+```
+
+El firmware informa el motivo de cada arranque. Un `CAIDA DE TENSION` o un
+`WATCHDOG DE TAREA` en el log explica por sí solo un F₀ que no cerró.
 
 > **Nota sobre la marcha en seco:** el detector ingenuo («salida al 100 % durante
 > X minutos sin subir Y grados») **da falso positivo durante la purga**, donde el
@@ -207,7 +239,7 @@ Requiere `arduino-cli`, el core `esp32:esp32` y las librerías
 | 4. Caracterización de planta | ✅ |
 | 5. Control PID | ✅ |
 | 6. Ciclo con F₀ | ✅ |
-| 7. Capas de seguridad | 🔄 falta verificar el disparo del watchdog |
+| 7. Capas de seguridad | ✅ las tres capas verificadas en hardware |
 | 8. Gabinete y validación de penetración | ⬜ |
 
 **Pendiente crítico:** validación con sonda de penetración en el centro de la
